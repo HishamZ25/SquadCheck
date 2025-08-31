@@ -136,4 +136,14 @@ export interface ChatMessage {
   timestamp: Date;
   checkIn?: CheckIn;
   metadata?: Record<string, any>;
+}
+
+export interface Friendship {
+  id: string;
+  userId1: string;
+  userId2: string;
+  status: 'pending' | 'accepted' | 'blocked';
+  requestedBy: string;
+  requestedAt: Date | string;
+  acceptedAt?: Date | string;
 } 

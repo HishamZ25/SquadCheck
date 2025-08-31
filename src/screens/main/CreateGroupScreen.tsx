@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { Theme } from '../../constants/theme';
 import { Button } from '../../components/common/Button';
 import { Avatar } from '../../components/common/Avatar';
 import { GroupService } from '../../services/groupService';
+import { FriendshipService } from '../../services/friendshipService';
 import { auth } from '../../services/firebase';
 
 interface CreateGroupScreenProps {
@@ -39,6 +40,41 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
   const [selectedPicture, setSelectedPicture] = useState('');
   const [selectedBadge, setSelectedBadge] = useState('');
 
+  // Load friends when component mounts
+  useEffect(() => {
+    loadFriends();
+  }, []);
+
+  const loadFriends = async () => {
+    try {
+      console.log('🚀 Starting to load friends...');
+      setLoadingFriends(true);
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        console.log('👤 Current user ID:', currentUser.uid);
+        const userFriends = await FriendshipService.getUserFriends(currentUser.uid);
+        console.log('👥 Raw friends from service:', userFriends);
+        
+        const friendsWithSelection = userFriends.map(friend => ({
+          id: friend.id,
+          displayName: friend.displayName,
+          photoURL: friend.photoURL || '',
+          selected: false
+        }));
+        
+        console.log('🎯 Processed friends with selection:', friendsWithSelection);
+        setFriends(friendsWithSelection);
+      } else {
+        console.log('❌ No current user found');
+      }
+    } catch (error) {
+      console.error('Error loading friends:', error);
+    } finally {
+      setLoadingFriends(false);
+      console.log('🏁 Finished loading friends');
+    }
+  };
+
   const addRequirement = () => {
     setRequirements([...requirements, '']);
   };
@@ -61,11 +97,8 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
     }
   };
 
-  const [friends, setFriends] = useState<Friend[]>([
-    { id: '1', displayName: 'Alex Chen', photoURL: '', selected: false },
-    { id: '2', displayName: 'Sarah Kim', photoURL: '', selected: false },
-    { id: '3', displayName: 'Mike Johnson', photoURL: '', selected: false },
-  ]);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [loadingFriends, setLoadingFriends] = useState(true);
 
   const toggleFriendSelection = (friendId: string) => {
     setFriends(prevFriends => 
@@ -115,9 +148,9 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
         requirements.filter(req => req.trim()), // Remove empty requirements
         {
           points: pointsReward,
-          title: selectedTitle || undefined,
-          picture: selectedPicture || undefined,
-          badge: selectedBadge || undefined,
+          ...(selectedTitle && { title: selectedTitle }),
+          ...(selectedPicture && { picture: selectedPicture }),
+          ...(selectedBadge && { badge: selectedBadge }),
         },
         penaltyAmount,
         currentUser.uid,
@@ -384,32 +417,47 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Invite Friends</Text>
 
-          {friends.map((friend) => (
-            <TouchableOpacity
-              key={friend.id}
-              style={[styles.friendItem, friend.selected && styles.friendItemSelected]}
-              onPress={() => toggleFriendSelection(friend.id)}
-            >
-              <Avatar
-                source={friend.photoURL}
-                initials={friend.displayName.charAt(0)}
-                size="md"
-              />
-              <Text style={styles.friendName}>{friend.displayName}</Text>
-              <View style={styles.selectionIndicator}>
-                {friend.selected ? (
-                  <Ionicons name="checkmark-circle" size={24} color={Theme.colors.secondary} />
-                ) : (
-                  <Ionicons name="ellipse-outline" size={24} color={Theme.colors.textTertiary} />
-                )}
-              </View>
-            </TouchableOpacity>
-          ))}
+          {loadingFriends ? (
+            <View style={styles.loadingFriends}>
+              <Ionicons name="refresh" size={24} color={Theme.colors.gray400} />
+              <Text style={styles.loadingFriendsText}>Loading friends...</Text>
+            </View>
+          ) : friends.length === 0 ? (
+            <View style={styles.noFriends}>
+              <Ionicons name="people-outline" size={32} color={Theme.colors.gray400} />
+              <Text style={styles.noFriendsText}>No friends yet</Text>
+              <Text style={styles.noFriendsSubtext}>Add friends to invite them to groups</Text>
+            </View>
+          ) : (
+            <>
+              {friends.map((friend) => (
+                <TouchableOpacity
+                  key={friend.id}
+                  style={[styles.friendItem, friend.selected && styles.friendItemSelected]}
+                  onPress={() => toggleFriendSelection(friend.id)}
+                >
+                  <Avatar
+                    source={friend.photoURL}
+                    initials={friend.displayName.charAt(0)}
+                    size="md"
+                  />
+                  <Text style={styles.friendName}>{friend.displayName}</Text>
+                  <View style={styles.selectionIndicator}>
+                    {friend.selected ? (
+                      <Ionicons name="checkmark-circle" size={24} color={Theme.colors.secondary} />
+                    ) : (
+                      <Ionicons name="ellipse-outline" size={24} color={Theme.colors.textTertiary} />
+                    )}
+                  </View>
+                </TouchableOpacity>
+              ))}
 
-          <TouchableOpacity style={styles.inviteButton} onPress={handleInviteExternalUsers}>
-            <Ionicons name="person-add" size={20} color={Theme.colors.secondary} />
-            <Text style={styles.inviteButtonText}>Invite After Creation</Text>
-          </TouchableOpacity>
+              <TouchableOpacity style={styles.inviteButton} onPress={handleInviteExternalUsers}>
+                <Ionicons name="person-add" size={20} color={Theme.colors.secondary} />
+                <Text style={styles.inviteButtonText}>Invite More Friends</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         {/* Create Group Button */}
@@ -671,5 +719,34 @@ const styles = StyleSheet.create({
   
   createButton: {
     width: '100%',
+  },
+  
+  loadingFriends: {
+    alignItems: 'center',
+    paddingVertical: Theme.spacing.lg,
+  },
+  
+  loadingFriendsText: {
+    ...Theme.typography.bodySmall,
+    color: Theme.colors.textSecondary,
+    marginTop: Theme.spacing.sm,
+  },
+  
+  noFriends: {
+    alignItems: 'center',
+    paddingVertical: Theme.spacing.lg,
+  },
+  
+  noFriendsText: {
+    ...Theme.typography.body,
+    color: Theme.colors.textSecondary,
+    marginTop: Theme.spacing.md,
+    marginBottom: Theme.spacing.xs,
+  },
+  
+  noFriendsSubtext: {
+    ...Theme.typography.bodySmall,
+    color: Theme.colors.textTertiary,
+    textAlign: 'center',
   },
 }); 

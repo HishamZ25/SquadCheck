@@ -126,7 +126,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const handleNewGroup = () => {
     console.log('New Group pressed');
     setShowActionMenu(false);
-    navigation.navigate('CreateGroup');
+            navigation.navigate('GroupType');
   };
 
   const handleNewSoloEndeavor = () => {

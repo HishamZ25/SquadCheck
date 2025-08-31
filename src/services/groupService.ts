@@ -72,7 +72,19 @@ export class GroupService {
   // Get groups for a user
   static async getUserGroups(userId: string): Promise<Group[]> {
     try {
-      // Query groups where user is a member
+      console.log('🔍 getUserGroups called with userId:', userId);
+      
+      // First, let's try a simple query without orderBy to see if the issue is with the index
+      console.log('🧪 Testing simple query first...');
+      const simpleQuery = query(
+        collection(db, 'groups'),
+        where('memberIds', 'array-contains', userId)
+      );
+      
+      const simpleSnapshot = await getDocs(simpleQuery);
+      console.log('🧪 Simple query result - Total docs:', simpleSnapshot.size);
+      
+      // Now try the full query
       const groupsQuery = query(
         collection(db, 'groups'),
         where('memberIds', 'array-contains', userId),
@@ -80,13 +92,24 @@ export class GroupService {
         orderBy('createdAt', 'desc')
       );
 
+      console.log('📋 Full query created:', groupsQuery);
+      
       const querySnapshot = await getDocs(groupsQuery);
-      return querySnapshot.docs.map(doc => ({ 
-        id: doc.id, 
-        ...doc.data() 
-      }) as Group);
+      console.log('📊 Full query result - Total docs:', querySnapshot.size);
+      
+      const groups = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log('📄 Group doc:', doc.id, 'memberIds:', data.memberIds, 'status:', data.status);
+        return { 
+          id: doc.id, 
+          ...data 
+        } as Group;
+      });
+      
+      console.log('✅ Final groups array length:', groups.length);
+      return groups;
     } catch (error) {
-      console.error('Error getting user groups:', error);
+      console.error('❌ Error getting user groups:', error);
       return [];
     }
   }
@@ -230,6 +253,8 @@ export class GroupService {
 
   // Listen to user's groups in real-time
   static subscribeToUserGroups(userId: string, callback: (groups: Group[]) => void) {
+    console.log('🔍 subscribeToUserGroups called with userId:', userId);
+    
     const groupsQuery = query(
       collection(db, 'groups'),
       where('memberIds', 'array-contains', userId),
@@ -237,11 +262,21 @@ export class GroupService {
       orderBy('createdAt', 'desc')
     );
 
+    console.log('📋 Subscription query created');
+
     return onSnapshot(groupsQuery, (querySnapshot) => {
-      const groups = querySnapshot.docs.map(doc => ({ 
-        id: doc.id, 
-        ...doc.data() 
-      }) as Group);
+      console.log('📊 Subscription update - Total docs:', querySnapshot.size);
+      
+      const groups = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log('📄 Subscription group doc:', doc.id, 'memberIds:', data.memberIds, 'status:', data.status);
+        return { 
+          id: doc.id, 
+          ...data 
+        } as Group;
+      });
+      
+      console.log('✅ Subscription callback with groups length:', groups.length);
       callback(groups);
     });
   }

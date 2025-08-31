@@ -14,9 +14,11 @@ import { SignUpScreen } from '../screens/auth/SignUpScreen';
 // Main Screens
 import { HomeScreen } from '../screens/main/HomeScreen';
 import { GroupsScreen } from '../screens/main/GroupsScreen';
+import { GroupChatScreen } from '../screens/main/GroupChatScreen';
 import { SocialScreen } from '../screens/main/SocialScreen';
 import { SettingsScreen } from '../screens/main/SettingsScreen';
 import { CreateGroupScreen } from '../screens/main/CreateGroupScreen';
+import { GroupTypeScreen } from '../screens/main/GroupTypeScreen';
 
 // Create navigators
 const Stack = createStackNavigator();
@@ -97,7 +99,9 @@ const RootNavigator = () => {
         <>
           <Stack.Screen name="Main" component={MainTabNavigator} />
           <Stack.Screen name="Settings" component={SettingsScreen} />
+          <Stack.Screen name="GroupType" component={GroupTypeScreen} />
           <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
+          <Stack.Screen name="GroupChat" component={GroupChatScreen} />
         </>
       ) : (
         // Not authenticated - show auth screens
