@@ -9,9 +9,12 @@ import {
   TextInput,
   Alert,
   Linking,
+  Platform,
+  Modal,
 } from 'react-native';
 
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Theme } from '../../constants/theme';
 import { Button } from '../../components/common/Button';
 import { Avatar } from '../../components/common/Avatar';
@@ -19,8 +22,15 @@ import { GroupService } from '../../services/groupService';
 import { FriendshipService } from '../../services/friendshipService';
 import { auth } from '../../services/firebase';
 
+type GroupType = 'elimination' | 'deadline' | 'progression';
+
 interface CreateGroupScreenProps {
   navigation: any;
+  route?: {
+    params?: {
+      groupType?: GroupType;
+    };
+  };
 }
 
 interface Friend {
@@ -30,7 +40,9 @@ interface Friend {
   selected: boolean;
 }
 
-export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation }) => {
+export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation, route }) => {
+  const groupType = route?.params?.groupType || 'elimination';
+  
   const [challengeTitle, setChallengeTitle] = useState('');
   const [goal, setGoal] = useState('');
   const [requirements, setRequirements] = useState(['']);
@@ -39,6 +51,19 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
   const [selectedTitle, setSelectedTitle] = useState('');
   const [selectedPicture, setSelectedPicture] = useState('');
   const [selectedBadge, setSelectedBadge] = useState('');
+  
+  // Configuration states based on group type
+  const [eliminationRule, setEliminationRule] = useState('');
+  const [startDate, setStartDate] = useState<Date | undefined>(undefined);
+  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+  const [progressionDuration, setProgressionDuration] = useState<number>(7);
+  const [intervalType, setIntervalType] = useState('');
+  const [assessmentTime, setAssessmentTime] = useState<Date>(new Date(new Date().setHours(0, 0, 0, 0)));
+  
+  // Date picker states
+  const [showStartDatePicker, setShowStartDatePicker] = useState(false);
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
 
   // Load friends when component mounts
   useEffect(() => {
@@ -127,9 +152,51 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
     );
   };
 
+  const handleStartDateChange = (event: any, selectedDate?: Date) => {
+    setShowStartDatePicker(false);
+    if (selectedDate) {
+      setStartDate(selectedDate);
+    }
+  };
+
+  const handleEndDateChange = (event: any, selectedDate?: Date) => {
+    setShowEndDatePicker(false);
+    if (selectedDate) {
+      // Ensure end date is after start date
+      if (startDate && selectedDate <= startDate) {
+        Alert.alert('Invalid Date', 'End date must be after start date');
+        return;
+      }
+      setEndDate(selectedDate);
+    }
+  };
+
+  const handleTimeChange = (event: any, selectedTime?: Date) => {
+    setShowTimePicker(false);
+    if (selectedTime) {
+      setAssessmentTime(selectedTime);
+    }
+  };
+
   const handleCreateGroup = async () => {
     if (!challengeTitle.trim() || !goal.trim()) {
       Alert.alert('Missing Information', 'Please fill in the challenge title and goal.');
+      return;
+    }
+
+    // Validate required fields based on group type
+    if (groupType === 'elimination' && !eliminationRule.trim()) {
+      Alert.alert('Error', 'Please enter an elimination rule');
+      return;
+    }
+
+    if (groupType === 'deadline' && (!startDate || !endDate)) {
+      Alert.alert('Error', 'Please select both start and end dates');
+      return;
+    }
+
+    if (groupType === 'progression' && (!progressionDuration || !intervalType.trim())) {
+      Alert.alert('Error', 'Please fill in all progression fields');
       return;
     }
 
@@ -262,7 +329,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <Ionicons name="arrow-back" size={24} color={Theme.colors.text} />
+            <Ionicons name="arrow-back" size={22} color="#000000" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Create New Group</Text>
           <View style={styles.placeholder} />
@@ -282,18 +349,122 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
           />
         </View>
 
-        {/* Goal Section */}
+        {/* Challenge Configuration Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Goal</Text>
-          <TextInput
-            style={styles.textInput}
-            placeholder="What is the Goal of this Challenge?"
-            placeholderTextColor={Theme.colors.textTertiary}
-            value={goal}
-            onChangeText={setGoal}
-            multiline
-            textAlign="center"
-          />
+          <Text style={styles.sectionTitle}>
+            Configure {groupType.charAt(0).toUpperCase() + groupType.slice(1)} Challenge
+          </Text>
+
+          {groupType === 'elimination' && (
+            <View>
+              <Text style={styles.configSubtitle}>
+                Define what happens when a user misses a requirement
+              </Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Enter elimination rule..."
+                placeholderTextColor={Theme.colors.textTertiary}
+                value={eliminationRule}
+                onChangeText={setEliminationRule}
+                multiline
+                textAlign="center"
+              />
+            </View>
+          )}
+
+          {groupType === 'deadline' && (
+            <View>
+              <Text style={styles.configSubtitle}>
+                Set when the challenge starts and ends
+              </Text>
+              <View style={styles.dateRow}>
+                <View style={styles.dateInput}>
+                  <Text style={styles.dateLabel}>Start Date</Text>
+                  <TouchableOpacity 
+                    style={styles.dateButton}
+                    onPress={() => setShowStartDatePicker(true)}
+                  >
+                    <Text style={styles.dateButtonText}>
+                      {startDate ? startDate.toLocaleDateString() : 'Select start date'}
+                    </Text>
+                    <Ionicons name="calendar" size={20} color={Theme.colors.textTertiary} />
+                  </TouchableOpacity>
+                </View>
+                
+                <View style={styles.dateInput}>
+                  <Text style={styles.dateLabel}>End Date</Text>
+                  <TouchableOpacity 
+                    style={styles.dateButton}
+                    onPress={() => setShowEndDatePicker(true)}
+                  >
+                    <Text style={styles.dateButtonText}>
+                      {endDate ? endDate.toLocaleDateString() : 'Select end date'}
+                    </Text>
+                    <Ionicons name="calendar" size={20} color={Theme.colors.textTertiary} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {groupType === 'progression' && (
+            <View>
+              <View style={styles.progressionInput}>
+                <Text style={styles.configSubtitle}>
+                  Choose the amount of time between each interval progression
+                </Text>
+                <View style={styles.numberInputContainer}>
+                  <TouchableOpacity 
+                    style={styles.numberButton}
+                    onPress={() => setProgressionDuration(Math.max(1, progressionDuration - 1))}
+                  >
+                    <Ionicons name="remove" size={20} color={Theme.colors.white} />
+                  </TouchableOpacity>
+                  <Text style={styles.numberValue}>{progressionDuration} days</Text>
+                  <TouchableOpacity 
+                    style={styles.numberButton}
+                    onPress={() => setProgressionDuration(progressionDuration + 1)}
+                  >
+                    <Ionicons name="add" size={20} color={Theme.colors.white} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              <View style={styles.progressionInput}>
+                <Text style={styles.configSubtitle}>
+                  What needs to increase? Cardio done? Time spent coding?
+                </Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Enter interval type..."
+                  placeholderTextColor={Theme.colors.textTertiary}
+                  value={intervalType}
+                  onChangeText={setIntervalType}
+                  multiline
+                  textAlign="center"
+                />
+              </View>
+            </View>
+          )}
+
+          {/* AI Assessment Time - shown for all types */}
+          <View style={styles.assessmentTimeContainer}>
+            <Text style={styles.configSubtitle}>
+              Choose when the AI will assess what users posted (default: midnight)
+            </Text>
+            <TouchableOpacity 
+              style={styles.timeInputButton}
+              onPress={() => setShowTimePicker(true)}
+            >
+              <Text style={styles.timeInputButtonText}>
+                {assessmentTime.toLocaleTimeString([], { 
+                  hour: '2-digit', 
+                  minute: '2-digit' 
+                })}
+              </Text>
+              <Ionicons name="time" size={20} color={Theme.colors.textTertiary} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Requirements & Rules Section */}
@@ -413,7 +584,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
           </View>
         </View>
 
-                {/* Invite Friends Section */}
+        {/* Invite Friends Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Invite Friends</Text>
 
@@ -470,6 +641,180 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
           />
         </View>
       </ScrollView>
+
+      {/* Date and Time Pickers */}
+      {Platform.OS === 'ios' ? (
+        <>
+          {/* Start Date Picker Modal for iOS */}
+          <Modal
+            visible={showStartDatePicker}
+            transparent={true}
+            animationType="slide"
+            onRequestClose={() => setShowStartDatePicker(false)}
+          >
+            <View style={styles.pickerModalContainer}>
+              <View style={styles.pickerModalContent}>
+                <View style={styles.pickerModalHeader}>
+                  <TouchableOpacity
+                    onPress={() => setShowStartDatePicker(false)}
+                    style={styles.pickerModalButton}
+                  >
+                    <Text style={styles.pickerModalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.pickerModalTitle}>Select Start Date</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (startDate) {
+                        setShowStartDatePicker(false);
+                      }
+                    }}
+                    style={styles.pickerModalButton}
+                  >
+                    <Text style={styles.pickerModalDoneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={startDate || new Date()}
+                  mode="date"
+                  display="spinner"
+                  onChange={(event, selectedDate) => {
+                    if (selectedDate) {
+                      setStartDate(selectedDate);
+                    }
+                  }}
+                  textColor={Theme.colors.white}
+                  accentColor={Theme.colors.secondary}
+                />
+              </View>
+            </View>
+          </Modal>
+
+          {/* End Date Picker Modal for iOS */}
+          <Modal
+            visible={showEndDatePicker}
+            transparent={true}
+            animationType="slide"
+            onRequestClose={() => setShowEndDatePicker(false)}
+          >
+            <View style={styles.pickerModalContainer}>
+              <View style={styles.pickerModalContent}>
+                <View style={styles.pickerModalHeader}>
+                  <TouchableOpacity
+                    onPress={() => setShowEndDatePicker(false)}
+                    style={styles.pickerModalButton}
+                  >
+                    <Text style={styles.pickerModalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.pickerModalTitle}>Select End Date</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (endDate) {
+                        setShowEndDatePicker(false);
+                      }
+                    }}
+                    style={styles.pickerModalButton}
+                  >
+                    <Text style={styles.pickerModalDoneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={endDate || new Date()}
+                  mode="date"
+                  display="spinner"
+                  onChange={(event, selectedDate) => {
+                    if (selectedDate) {
+                      // Ensure end date is after start date
+                      if (startDate && selectedDate <= startDate) {
+                        Alert.alert('Invalid Date', 'End date must be after start date');
+                        return;
+                      }
+                      setEndDate(selectedDate);
+                    }
+                  }}
+                  textColor={Theme.colors.white}
+                  accentColor={Theme.colors.secondary}
+                />
+              </View>
+            </View>
+          </Modal>
+
+          {/* Time Picker Modal for iOS */}
+          <Modal
+            visible={showTimePicker}
+            transparent={true}
+            animationType="slide"
+            onRequestClose={() => setShowTimePicker(false)}
+          >
+            <View style={styles.pickerModalContainer}>
+              <View style={styles.pickerModalContent}>
+                <View style={styles.pickerModalHeader}>
+                  <TouchableOpacity
+                    onPress={() => setShowTimePicker(false)}
+                    style={styles.pickerModalButton}
+                  >
+                    <Text style={styles.pickerModalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.pickerModalTitle}>Select Time</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowTimePicker(false)}
+                    style={styles.pickerModalButton}
+                  >
+                    <Text style={styles.pickerModalDoneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={assessmentTime}
+                  mode="time"
+                  display="spinner"
+                  onChange={(event, selectedTime) => {
+                    if (selectedTime) {
+                      setAssessmentTime(selectedTime);
+                    }
+                  }}
+                  textColor={Theme.colors.white}
+                  accentColor={Theme.colors.secondary}
+                />
+              </View>
+            </View>
+          </Modal>
+        </>
+      ) : (
+        <>
+          {/* Android pickers - have built-in cancel */}
+          {showStartDatePicker && (
+            <DateTimePicker
+              value={startDate || new Date()}
+              mode="date"
+              display="default"
+              onChange={handleStartDateChange}
+              textColor={Theme.colors.white}
+              accentColor={Theme.colors.secondary}
+            />
+          )}
+
+          {showEndDatePicker && (
+            <DateTimePicker
+              value={endDate || new Date()}
+              mode="date"
+              display="default"
+              onChange={handleEndDateChange}
+              textColor={Theme.colors.white}
+              accentColor={Theme.colors.secondary}
+            />
+          )}
+
+          {showTimePicker && (
+            <DateTimePicker
+              value={assessmentTime}
+              mode="time"
+              display="default"
+              onChange={handleTimeChange}
+              textColor={Theme.colors.white}
+              accentColor={Theme.colors.secondary}
+            />
+          )}
+        </>
+      )}
     </SafeAreaView>
   );
 };
@@ -477,7 +822,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Theme.colors.background,
+    backgroundColor: '#F1F0ED',
   },
   
   scrollView: {
@@ -490,20 +835,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: Theme.layout.screenPadding,
     paddingVertical: Theme.spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: Theme.colors.border,
   },
   
   backButton: {
     padding: Theme.spacing.sm,
-    borderRadius: Theme.borderRadius.md,
-    backgroundColor: Theme.colors.card,
   },
   
   headerTitle: {
     ...Theme.typography.h2,
-    color: Theme.colors.text,
+    color: '#FF6B35',
     fontWeight: '700',
+    flex: 1,
+    textAlign: 'center',
   },
   
   placeholder: {
@@ -518,19 +861,21 @@ const styles = StyleSheet.create({
   
   sectionTitle: {
     ...Theme.typography.h3,
-    color: Theme.colors.text,
+    color: '#000000',
     marginBottom: Theme.spacing.xs,
     fontWeight: '600',
     textAlign: 'center',
   },
   
   textInput: {
-    backgroundColor: Theme.colors.card,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#FF6B35',
     borderRadius: Theme.borderRadius.md,
     padding: Theme.spacing.md,
-    color: Theme.colors.text,
+    color: '#000000',
     fontSize: 16,
-    minHeight: 50,
+    minHeight: Theme.layout.inputHeight,
     textAlignVertical: 'center',
   },
   
@@ -552,7 +897,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
     padding: Theme.spacing.sm,
-    color: Theme.colors.text,
+    color: '#000000',
     fontSize: 16,
     minHeight: 40,
     textAlignVertical: 'center',
@@ -591,7 +936,7 @@ const styles = StyleSheet.create({
   
   rewardLabel: {
     ...Theme.typography.body,
-    color: Theme.colors.text,
+    color: '#000000',
     marginLeft: Theme.spacing.sm,
     fontWeight: '500',
   },
@@ -600,7 +945,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: Theme.colors.card,
+    backgroundColor: '#F5F5F5',
     borderRadius: Theme.borderRadius.md,
     padding: Theme.spacing.sm,
   },
@@ -616,7 +961,7 @@ const styles = StyleSheet.create({
   
   pointsValue: {
     ...Theme.typography.h4,
-    color: Theme.colors.text,
+    color: '#000000',
     fontWeight: '700',
     minWidth: 80,
     textAlign: 'center',
@@ -626,14 +971,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: Theme.colors.card,
+    backgroundColor: '#F5F5F5',
     borderRadius: Theme.borderRadius.md,
     padding: Theme.spacing.md,
   },
   
   selectRewardText: {
     ...Theme.typography.body,
-    color: Theme.colors.textTertiary,
+    color: '#999999',
   },
   
   rewardsRow: {
@@ -650,7 +995,7 @@ const styles = StyleSheet.create({
   },
   
   selectRewardButtonCompact: {
-    backgroundColor: Theme.colors.card,
+    backgroundColor: '#F5F5F5',
     borderRadius: Theme.borderRadius.md,
     padding: Theme.spacing.sm,
     marginTop: Theme.spacing.xs,
@@ -660,7 +1005,7 @@ const styles = StyleSheet.create({
   
   selectRewardTextCompact: {
     ...Theme.typography.caption,
-    color: Theme.colors.textTertiary,
+    color: '#999999',
     textAlign: 'center',
   },
   
@@ -669,20 +1014,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: Theme.spacing.sm,
     paddingHorizontal: Theme.spacing.md,
-    backgroundColor: Theme.colors.card,
+    backgroundColor: '#F5F5F5',
     borderRadius: Theme.borderRadius.md,
     marginBottom: Theme.spacing.sm,
   },
   
   friendItemSelected: {
-    backgroundColor: Theme.colors.primary,
+    backgroundColor: '#FFFFFF',
     borderWidth: 2,
     borderColor: Theme.colors.secondary,
   },
   
   friendName: {
     ...Theme.typography.body,
-    color: Theme.colors.text,
+    color: '#000000',
     marginLeft: Theme.spacing.md,
     flex: 1,
   },
@@ -728,7 +1073,7 @@ const styles = StyleSheet.create({
   
   loadingFriendsText: {
     ...Theme.typography.bodySmall,
-    color: Theme.colors.textSecondary,
+    color: '#666666',
     marginTop: Theme.spacing.sm,
   },
   
@@ -739,14 +1084,148 @@ const styles = StyleSheet.create({
   
   noFriendsText: {
     ...Theme.typography.body,
-    color: Theme.colors.textSecondary,
+    color: '#666666',
     marginTop: Theme.spacing.md,
     marginBottom: Theme.spacing.xs,
   },
   
   noFriendsSubtext: {
     ...Theme.typography.bodySmall,
-    color: Theme.colors.textTertiary,
+    color: '#999999',
     textAlign: 'center',
+  },
+  
+  configSubtitle: {
+    ...Theme.typography.bodySmall,
+    color: '#666666',
+    marginBottom: Theme.spacing.md,
+    textAlign: 'center',
+  },
+  
+  dateRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: Theme.spacing.sm,
+    marginBottom: Theme.spacing.md,
+  },
+  
+  dateInput: {
+    flex: 1,
+  },
+  
+  dateLabel: {
+    ...Theme.typography.bodySmall,
+    color: '#666666',
+    marginBottom: Theme.spacing.xs,
+    textAlign: 'center',
+  },
+  
+  dateButton: {
+    backgroundColor: '#F5F5F5',
+    borderRadius: Theme.borderRadius.md,
+    padding: Theme.spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 50,
+  },
+  
+  dateButtonText: {
+    ...Theme.typography.body,
+    color: '#000000',
+  },
+  
+  progressionInput: {
+    marginBottom: Theme.spacing.md,
+  },
+  
+  numberInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F5F5F5',
+    borderRadius: Theme.borderRadius.md,
+    padding: Theme.spacing.sm,
+  },
+  
+  numberButton: {
+    backgroundColor: Theme.colors.secondary,
+    borderRadius: Theme.borderRadius.md,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  
+  numberValue: {
+    ...Theme.typography.body,
+    color: '#000000',
+    fontWeight: '600',
+    minWidth: 80,
+    textAlign: 'center',
+  },
+  
+  assessmentTimeContainer: {
+    marginTop: Theme.spacing.md,
+  },
+  
+  timeInputButton: {
+    backgroundColor: '#F5F5F5',
+    borderRadius: Theme.borderRadius.md,
+    padding: Theme.spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 50,
+  },
+  
+  timeInputButtonText: {
+    ...Theme.typography.body,
+    color: '#000000',
+  },
+  
+  pickerModalContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  
+  pickerModalContent: {
+    backgroundColor: Theme.colors.background,
+    borderTopLeftRadius: Theme.borderRadius.xl,
+    borderTopRightRadius: Theme.borderRadius.xl,
+    paddingBottom: Theme.spacing.xl,
+  },
+  
+  pickerModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: Theme.spacing.lg,
+    paddingVertical: Theme.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Theme.colors.border,
+  },
+  
+  pickerModalButton: {
+    paddingVertical: Theme.spacing.sm,
+    paddingHorizontal: Theme.spacing.md,
+  },
+  
+  pickerModalCancelText: {
+    ...Theme.typography.body,
+    color: '#666666',
+  },
+  
+  pickerModalDoneText: {
+    ...Theme.typography.body,
+    color: Theme.colors.secondary,
+    fontWeight: '600',
+  },
+  
+  pickerModalTitle: {
+    ...Theme.typography.h4,
+    color: '#000000',
+    fontWeight: '600',
   },
 }); 

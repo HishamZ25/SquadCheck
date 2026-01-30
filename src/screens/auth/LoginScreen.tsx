@@ -7,6 +7,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  TouchableOpacity,
 } from 'react-native';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
@@ -105,13 +106,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
             style={styles.loginButton}
           />
 
-          <Button
-            title="Don't have an account? Sign Up"
-            onPress={handleSignUp}
-            variant="ghost"
-            fullWidth
-            style={styles.signUpButton}
-          />
+          <TouchableOpacity onPress={handleSignUp} style={styles.signUpLink}>
+            <Text style={styles.signUpText}>
+              Don't have an account? <Text style={styles.signUpLinkText}>Sign Up</Text>
+            </Text>
+          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -121,7 +120,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Theme.colors.background,
+    backgroundColor: '#F1F0ED',
+    position: 'relative',
   },
   
   content: {
@@ -143,13 +143,14 @@ const styles = StyleSheet.create({
     ...Theme.typography.h1,
     marginBottom: Theme.spacing.sm,
     textAlign: 'center',
-    color: Theme.colors.text,
+    color: '#000000',
+    fontWeight: '700',
   },
   
   subtitle: {
     ...Theme.typography.bodySmall,
     textAlign: 'center',
-    color: Theme.colors.textSecondary,
+    color: '#000000',
   },
   
   form: {
@@ -162,7 +163,18 @@ const styles = StyleSheet.create({
     marginBottom: Theme.spacing.md,
   },
   
-  signUpButton: {
-    marginTop: Theme.spacing.sm,
+  signUpLink: {
+    marginTop: Theme.spacing.md,
+    alignItems: 'center',
+  },
+  signUpText: {
+    ...Theme.typography.body,
+    color: '#000000',
+    textAlign: 'center',
+  },
+  signUpLinkText: {
+    ...Theme.typography.body,
+    color: '#FF6B35',
+    fontWeight: '600',
   },
 }); 

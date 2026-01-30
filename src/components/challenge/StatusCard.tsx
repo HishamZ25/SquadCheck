@@ -1,0 +1,146 @@
+import React from 'react';
+import { View, Text, StyleSheet, Image } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { challengeEval, type UserStatus } from '../../utils/challengeEval';
+
+interface StatusCardProps {
+  status: UserStatus;
+  currentCheckIn?: any; // The check-in data for completed status
+}
+
+export const StatusCard: React.FC<StatusCardProps> = ({ status, currentCheckIn }) => {
+  const getStatusConfig = () => {
+    switch (status.type) {
+      case 'completed':
+        return {
+          backgroundColor: '#4CAF50',
+          icon: 'checkmark-circle' as const,
+          title: 'Completed',
+          subtitle: challengeEval.formatTimestamp(status.timestamp),
+        };
+      case 'pending':
+        return {
+          backgroundColor: '#FF6B35', // Orange for pending
+          icon: 'time-outline' as const,
+          title: 'Pending',
+          subtitle: status.timeRemaining + ' left',
+        };
+      case 'missed':
+        return {
+          backgroundColor: '#F44336',
+          icon: 'close-circle' as const,
+          title: 'Missed',
+          subtitle: 'Due at ' + status.missedAt,
+        };
+      case 'eliminated':
+        return {
+          backgroundColor: '#666',
+          icon: 'skull-outline' as const,
+          title: 'Eliminated',
+          subtitle: status.strikes + ' strikes',
+        };
+    }
+  };
+
+  const config = getStatusConfig();
+  const isCompleted = status.type === 'completed';
+
+  return (
+    <View style={[styles.container, { backgroundColor: config.backgroundColor }]}>
+      <View style={styles.header}>
+        <Ionicons name={config.icon} size={24} color="#FFF" style={styles.icon} />
+        <View style={styles.headerText}>
+          <Text style={styles.title}>{config.title}</Text>
+          <Text style={styles.subtitle}>{config.subtitle}</Text>
+        </View>
+      </View>
+      
+      {/* Show submission details when completed */}
+      {isCompleted && currentCheckIn && (
+        <View style={styles.submissionDetails}>
+          {/* Show image if available */}
+          {currentCheckIn.attachments && currentCheckIn.attachments.length > 0 && (
+            <Image 
+              source={{ uri: currentCheckIn.attachments[0].uri || currentCheckIn.attachments[0].url }} 
+              style={styles.submissionImage} 
+              resizeMode="cover"
+            />
+          )}
+          
+          {/* Show text/note if available */}
+          {currentCheckIn.payload?.textValue && (
+            <Text style={styles.submissionNote}>{currentCheckIn.payload.textValue}</Text>
+          )}
+          
+          {/* Show number value if available */}
+          {currentCheckIn.payload?.numberValue !== undefined && (
+            <Text style={styles.submissionNote}>Value: {currentCheckIn.payload.numberValue}</Text>
+          )}
+          
+          {/* Show timer if available */}
+          {currentCheckIn.payload?.timerSeconds !== undefined && (
+            <Text style={styles.submissionNote}>
+              Time: {Math.floor(currentCheckIn.payload.timerSeconds / 60)}m {currentCheckIn.payload.timerSeconds % 60}s
+            </Text>
+          )}
+        </View>
+      )}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 12,
+  },
+
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  icon: {
+    marginRight: 10,
+  },
+
+  headerText: {
+    flex: 1,
+  },
+
+  title: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFF',
+    marginBottom: 2,
+  },
+
+  subtitle: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.95)',
+    fontWeight: '500',
+  },
+  
+  submissionDetails: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.3)',
+  },
+  
+  submissionImage: {
+    width: '100%',
+    height: 180,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  
+  submissionNote: {
+    fontSize: 13,
+    color: '#FFF',
+    fontWeight: '500',
+    marginTop: 4,
+  },
+});

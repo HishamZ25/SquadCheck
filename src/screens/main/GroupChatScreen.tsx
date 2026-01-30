@@ -16,13 +16,18 @@ import {
 import { Button } from '../../components/common/Button';
 import { Avatar } from '../../components/common/Avatar';
 import { CheckInModal } from '../../components/common/CheckInModal';
+import { LoadingSpinner } from '../../components/common/LoadingSpinner';
+import { GroupHeader } from '../../components/group/GroupHeader';
 import { Theme } from '../../constants/theme';
 import { GroupService } from '../../services/groupService';
 import { AuthService } from '../../services/authService';
 import { MessageService, GroupChatMessage } from '../../services/messageService';
-import { Group, User } from '../../types';
+import { ChallengeService } from '../../services/challengeService';
+import { Group, User, Challenge } from '../../types';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../services/firebase';
 
 type GroupChatScreenProps = StackScreenProps<any, 'GroupChat'>;
 
@@ -35,6 +40,8 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<GroupChatMessage[]>([]);
   const [showCheckInModal, setShowCheckInModal] = useState(false);
+  const [groupMembers, setGroupMembers] = useState<User[]>([]);
+  const [groupChallenges, setGroupChallenges] = useState<Challenge[]>([]);
 
   useEffect(() => {
     if (groupId) {
@@ -42,6 +49,9 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
       
       // Set up real-time listener for messages
       const unsubscribe = MessageService.subscribeToGroupMessages(groupId, (newMessages) => {
+        console.log('Real-time update - messages:', newMessages.length);
+        const checkIns = newMessages.filter(m => m.type === 'checkin');
+        console.log('Check-in messages in real-time update:', checkIns.length);
         setMessages(newMessages);
       });
       
@@ -54,24 +64,61 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
     try {
       setLoading(true);
       
-      // Load group data
-      const groupData = await GroupService.getGroup(groupId);
+      // Load all data in parallel for better performance
+      const [groupData, currentUser, realMessages] = await Promise.all([
+        GroupService.getGroup(groupId),
+        AuthService.getCurrentUser(),
+        MessageService.getGroupMessages(groupId)
+      ]);
+      
       setGroup(groupData);
-      
-      // Load current user
-      const currentUser = await AuthService.getCurrentUser();
       setUser(currentUser);
+      setMessages(realMessages);
       
-      // Load real messages from Firestore
-      if (groupId) {
-        const realMessages = await MessageService.getGroupMessages(groupId);
-        setMessages(realMessages);
+      console.log('Loaded messages for group:', groupId, 'count:', realMessages.length);
+      const checkInMessages = realMessages.filter(m => m.type === 'checkin');
+      console.log('Check-in messages:', checkInMessages.length, checkInMessages);
+      
+      // Load group members and challenges in parallel
+      if (groupData) {
+        await Promise.all([
+          loadGroupMembers(groupData),
+          loadGroupChallenges(groupId)
+        ]);
       }
     } catch (error) {
       console.error('Error loading group data:', error);
       Alert.alert('Error', 'Failed to load group data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadGroupMembers = async (groupData: Group) => {
+    try {
+      // Fetch all member documents in parallel instead of sequentially
+      const memberPromises = groupData.memberIds.map(memberId => 
+        getDoc(doc(db, 'users', memberId))
+          .then(userDoc => userDoc.exists() ? userDoc.data() as User : null)
+          .catch(error => {
+            console.error('Error loading member:', error);
+            return null;
+          })
+      );
+      
+      const members = (await Promise.all(memberPromises)).filter((m): m is User => m !== null);
+      setGroupMembers(members);
+    } catch (error) {
+      console.error('Error loading group members:', error);
+    }
+  };
+
+  const loadGroupChallenges = async (groupId: string) => {
+    try {
+      const challenges = await ChallengeService.getGroupChallenges(groupId);
+      setGroupChallenges(challenges as Challenge[]);
+    } catch (error) {
+      console.error('Error loading group challenges:', error);
     }
   };
 
@@ -161,6 +208,10 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
     const isOwnMessage = item.userId === user?.id;
     const isCheckIn = item.type === 'checkin';
     
+    if (isCheckIn) {
+      console.log('Rendering check-in message:', item.id, 'challengeTitle:', (item as any).challengeTitle, 'imageUrl:', item.imageUrl);
+    }
+    
     return (
       <View style={[styles.messageContainer, isOwnMessage && styles.ownMessage]}>
         {!isOwnMessage && (
@@ -184,28 +235,25 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
           {isCheckIn ? (
             // Check-In Message
             <View style={styles.checkInContent}>
-              {/* Check-In Header */}
-              <View style={styles.checkInHeader}>
-                <Text style={styles.checkInTitle}>{item.userName}'s Check-In</Text>
-                <Text style={styles.checkInDate}>
-                  {item.timestamp.toLocaleDateString([], { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
-                  })}
-                </Text>
-              </View>
+              {/* Challenge Title */}
+              {(item as any).challengeTitle && (
+                <View style={styles.challengeTitleContainer}>
+                  <Ionicons name="trophy" size={16} color="#FF6B35" />
+                  <Text style={styles.challengeTitle}>{(item as any).challengeTitle}</Text>
+                </View>
+              )}
               
               {/* Check-In Image */}
               {item.imageUrl && (
                 <Image source={{ uri: item.imageUrl }} style={styles.checkInImage} />
               )}
               
-              {/* Check-In Caption */}
-              <Text style={[styles.checkInCaption, isOwnMessage && styles.ownMessageText]}>
-                {item.text}
-              </Text>
+              {/* Check-In Caption / Note */}
+              {item.text && (
+                <Text style={styles.checkInNote}>
+                  {item.text}
+                </Text>
+              )}
               
               {/* Voting Buttons for Check-Ins */}
               <View style={styles.votingSection}>
@@ -287,13 +335,13 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
                 style={styles.cameraButton}
                 onPress={() => setShowCheckInModal(true)}
               >
-                <Ionicons name="camera" size={24} color={Theme.colors.secondary} />
+                <Ionicons name="camera" size={22} color="#FF6B35" />
               </TouchableOpacity>
               
               <TextInput
                 style={styles.messageInput}
                 placeholder="Type a message..."
-                placeholderTextColor={Theme.colors.textTertiary}
+                placeholderTextColor="#999"
                 value={messageText}
                 onChangeText={setMessageText}
                 multiline
@@ -306,9 +354,9 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
                 disabled={!messageText.trim()}
               >
                 <Ionicons 
-                  name="send" 
+                  name="arrow-forward" 
                   size={20} 
-                  color={messageText.trim() ? Theme.colors.white : Theme.colors.textTertiary} 
+                  color="#FFF" 
                 />
               </TouchableOpacity>
             </View>
@@ -316,152 +364,182 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
         );
         
       case 'leaderboard':
+        // Calculate leaderboard from messages (check-ins)
+        const leaderboardData = groupMembers.map((member, index) => {
+          const memberCheckIns = messages.filter(m => 
+            m.userId === member.id && m.type === 'checkin'
+          );
+          const points = memberCheckIns.length * 10; // 10 points per check-in
+          const streak = memberCheckIns.length; // Simple streak calculation
+          
+          return {
+            id: member.id,
+            rank: index + 1,
+            name: member.displayName,
+            points: points,
+            streak: streak,
+            avatar: member.photoURL || null,
+          };
+        }).sort((a, b) => b.points - a.points).map((item, index) => ({
+          ...item,
+          rank: index + 1
+        }));
+        
         return (
           <View style={styles.leaderboardContainer}>
             <Text style={styles.leaderboardTitle}>Group Leaderboard</Text>
             <Text style={styles.leaderboardSubtitle}>Ranked by check-in points</Text>
             
-            {/* Sample leaderboard data - will be replaced with real data */}
-            <FlatList
-              data={[
-                { id: '1', rank: 1, name: 'HishamZ', points: 15, streak: 3, avatar: null },
-                { id: '2', rank: 2, name: 'ImaRando', points: 12, streak: 2, avatar: null },
-                { id: '3', rank: 3, name: 'User3', points: 8, streak: 1, avatar: null },
-              ]}
-              renderItem={({ item }) => (
-                <View style={styles.leaderboardItem}>
-                  <View style={styles.rankContainer}>
-                    <Text style={styles.rankText}>{item.rank}</Text>
+            {leaderboardData.length === 0 ? (
+              <View style={styles.emptyLeaderboard}>
+                <Ionicons name="trophy-outline" size={48} color={Theme.colors.textSecondary} />
+                <Text style={styles.emptyLeaderboardText}>No check-ins yet</Text>
+                <Text style={styles.emptyLeaderboardSubtext}>Check-ins will appear here</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={leaderboardData}
+                renderItem={({ item }) => (
+                  <View style={styles.leaderboardItem}>
+                    <View style={styles.rankContainer}>
+                      <Text style={styles.rankText}>{item.rank}</Text>
+                    </View>
+                    
+                    <Avatar
+                      source={item.avatar}
+                      initials={item.name.charAt(0)}
+                      size="md"
+                      style={styles.leaderboardAvatar}
+                    />
+                    
+                    <View style={styles.leaderboardInfo}>
+                      <Text style={styles.leaderboardName}>{item.name}</Text>
+                      <Text style={styles.leaderboardStreak}>{item.streak} check-in{item.streak !== 1 ? 's' : ''}</Text>
+                    </View>
+                    
+                    <View style={styles.pointsContainer}>
+                      <Text style={styles.pointsText}>{item.points}</Text>
+                      <Text style={styles.pointsLabel}>pts</Text>
+                    </View>
                   </View>
-                  
-                  <Avatar
-                    source={item.avatar}
-                    initials={item.name.charAt(0)}
-                    size="md"
-                    style={styles.leaderboardAvatar}
-                  />
-                  
-                  <View style={styles.leaderboardInfo}>
-                    <Text style={styles.leaderboardName}>{item.name}</Text>
-                    <Text style={styles.leaderboardStreak}>{item.streak} day streak</Text>
-                  </View>
-                  
-                  <View style={styles.pointsContainer}>
-                    <Text style={styles.pointsText}>{item.points}</Text>
-                    <Text style={styles.pointsLabel}>pts</Text>
-                  </View>
-                </View>
-              )}
-              keyExtractor={(item) => item.id}
-              showsVerticalScrollIndicator={false}
-            />
+                )}
+                keyExtractor={(item) => item.id}
+                showsVerticalScrollIndicator={false}
+              />
+            )}
           </View>
         );
         
       case 'settings':
         return (
-          <ScrollView style={styles.settingsContainer} showsVerticalScrollIndicator={false}>
-            <Text style={styles.settingsTitle}>Group Settings</Text>
-            
-            {/* Requirements Section */}
-            <View style={styles.settingsSection}>
-              <Text style={styles.sectionTitle}>Requirements</Text>
-              {group?.requirements?.map((requirement, index) => (
-                <View key={index} style={styles.requirementItem}>
-                  <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
-                  <Text style={styles.requirementText}>{requirement}</Text>
-                </View>
-              )) || (
-                <Text style={styles.noRequirementsText}>No requirements set</Text>
-              )}
+          <ScrollView 
+            style={styles.settingsContainer} 
+            contentContainerStyle={styles.settingsContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Group Description Card */}
+            <View style={styles.settingsCard}>
+              <Text style={styles.cardLabel}>About</Text>
+              <Text style={styles.descriptionText}>{(group as any)?.description || 'No description'}</Text>
             </View>
             
-            {/* Rewards Section */}
-            <View style={styles.settingsSection}>
-              <Text style={styles.sectionTitle}>Rewards</Text>
-              {group?.rewards ? (
-                <>
-                  {group.rewards.points && (
-                    <View style={styles.rewardItem}>
-                      <Ionicons name="trophy" size={20} color="#FF6B35" />
-                      <Text style={styles.rewardText}>Points: {group.rewards.points}</Text>
-                    </View>
-                  )}
-                  {group.rewards.title && (
-                    <View style={styles.rewardItem}>
-                      <Ionicons name="star" size={20} color="#FFD700" />
-                      <Text style={styles.rewardText}>Title: {group.rewards.title}</Text>
-                    </View>
-                  )}
-                  {group.rewards.picture && (
-                    <View style={styles.rewardItem}>
-                      <Ionicons name="image" size={20} color="#4CAF50" />
-                      <Text style={styles.rewardText}>Picture: {group.rewards.picture}</Text>
-                    </View>
-                  )}
-                  {group.rewards.badge && (
-                    <View style={styles.rewardItem}>
-                      <Ionicons name="ribbon" size={20} color="#9C27B0" />
-                      <Text style={styles.rewardText}>Badge: {group.rewards.badge}</Text>
-                    </View>
-                  )}
-                  {!group.rewards.points && !group.rewards.title && !group.rewards.picture && !group.rewards.badge && (
-                    <Text style={styles.noRewardsText}>No rewards set</Text>
-                  )}
-                </>
+            {/* Members List */}
+            <View style={styles.settingsCard}>
+              <View style={styles.cardHeaderRow}>
+                <Text style={styles.cardLabel}>Members</Text>
+                <Text style={styles.cardCount}>{groupMembers.length}</Text>
+              </View>
+              <View style={styles.membersList}>
+                {groupMembers.map((member) => (
+                  <View key={member.id} style={styles.memberRow}>
+                    <Avatar
+                      source={member.photoURL}
+                      initials={member.displayName.charAt(0)}
+                      size="sm"
+                    />
+                    <Text style={styles.memberNameText}>{member.displayName}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+            
+            {/* Challenges List */}
+            <View style={styles.settingsCard}>
+              <View style={styles.cardHeaderRow}>
+                <Text style={styles.cardLabel}>Challenges</Text>
+                <Text style={styles.cardCount}>{groupChallenges.length}</Text>
+              </View>
+              {groupChallenges.length === 0 ? (
+                <Text style={styles.emptyText}>No challenges yet</Text>
               ) : (
-                <Text style={styles.noRewardsText}>No rewards set</Text>
+                <View style={styles.challengesList}>
+                  {groupChallenges.map((challenge) => (
+                    <TouchableOpacity 
+                      key={challenge.id} 
+                      style={styles.challengeRow}
+                      onPress={async () => {
+                        try {
+                          const challengeDetails = await ChallengeService.getChallengeDetails(
+                            challenge.id,
+                            user?.id || ''
+                          );
+                          navigation.navigate('ChallengeDetail', challengeDetails);
+                        } catch (error) {
+                          console.error('Error loading challenge:', error);
+                          Alert.alert('Error', 'Failed to load challenge');
+                        }
+                      }}
+                    >
+                      <View style={styles.challengeIconContainer}>
+                        <Ionicons 
+                          name={challenge.type === 'elimination' ? 'skull' : 'trophy'} 
+                          size={18} 
+                          color="#FF6B35" 
+                        />
+                      </View>
+                      <View style={styles.challengeInfo}>
+                        <Text style={styles.challengeNameText}>{challenge.title}</Text>
+                        <Text style={styles.challengeTypeText}>
+                          {challenge.cadence?.unit === 'daily' ? 'Daily' : `${challenge.cadence?.requiredCount || 1}x/week`}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color="#999" />
+                    </TouchableOpacity>
+                  ))}
+                </View>
               )}
             </View>
             
-            {/* Penalties Section */}
-            <View style={styles.settingsSection}>
-              <Text style={styles.sectionTitle}>Penalties</Text>
-              {group?.penalty ? (
-                <View style={styles.penaltyItem}>
-                  <Ionicons name="warning" size={20} color="#FF4444" />
-                  <Text style={styles.penaltyText}>Penalty: {group.penalty} points</Text>
-                </View>
-              ) : (
-                <View style={styles.penaltyItem}>
-                  <Ionicons name="warning" size={20} color="#FF4444" />
-                  <Text style={styles.penaltyText}>No penalty set</Text>
-                </View>
-              )}
-            </View>
-            
-            {/* Invite Section */}
-            <View style={styles.settingsSection}>
-              <Text style={styles.sectionTitle}>Invite Friends</Text>
-              <TouchableOpacity 
-                style={styles.inviteButton}
-                onPress={() => {
-                  Alert.alert(
-                    'Invite Friends',
-                    'This will generate a deep link to invite friends to the group. Coming soon!',
-                    [{ text: 'OK' }]
-                  );
-                }}
-              >
-                <Ionicons name="person-add" size={20} color={Theme.colors.white} />
-                <Text style={styles.inviteButtonText}>Invite More Friends</Text>
-              </TouchableOpacity>
-            </View>
-            
-            {/* Group Info */}
-            <View style={styles.settingsSection}>
-              <Text style={styles.sectionTitle}>Group Info</Text>
-              <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>Created:</Text>
-                <Text style={styles.infoValue}>
-                  {group?.createdAt ? 'Recently' : 'Unknown'}
+            {/* Quick Stats */}
+            <View style={styles.statsGrid}>
+              <View style={styles.statsCardSmall}>
+                <Ionicons name="people" size={24} color="#FF6B35" />
+                <Text style={styles.statsNumber}>{groupMembers.length}</Text>
+                <Text style={styles.statsLabel}>Members</Text>
+              </View>
+              <View style={styles.statsCardSmall}>
+                <Ionicons name="calendar" size={24} color="#4CAF50" />
+                <Text style={styles.statsNumber}>
+                  {group?.createdAt ? Math.floor((Date.now() - new Date(group.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0}
                 </Text>
-              </View>
-              <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>Members:</Text>
-                <Text style={styles.infoValue}>{group?.memberIds?.length || 0}</Text>
+                <Text style={styles.statsLabel}>Days Active</Text>
               </View>
             </View>
+            
+            {/* Invite Button */}
+            <TouchableOpacity 
+              style={styles.inviteButton}
+              onPress={() => {
+                Alert.alert(
+                  'Invite Friends',
+                  'Share this group with your friends. Coming soon!',
+                  [{ text: 'OK' }]
+                );
+              }}
+            >
+              <Ionicons name="person-add" size={18} color="#FFF" />
+              <Text style={styles.inviteButtonText}>Invite Friends</Text>
+            </TouchableOpacity>
           </ScrollView>
         );
         
@@ -471,14 +549,7 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
   };
 
   if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Ionicons name="refresh" size={32} color={Theme.colors.gray400} />
-          <Text style={styles.loadingText}>Loading group...</Text>
-        </View>
-      </SafeAreaView>
-    );
+    return <LoadingSpinner text="Loading group..." />;
   }
 
   if (!group) {
@@ -495,16 +566,10 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={Theme.colors.text} />
-        </TouchableOpacity>
-        <View style={styles.headerInfo}>
-          <Text style={styles.groupName}>{group.name}</Text>
-          <Text style={styles.groupGoal}>{group.goal}</Text>
-        </View>
-        <View style={styles.headerPlaceholder} />
-      </View>
+      <GroupHeader
+        name={group.name}
+        onBack={() => navigation.goBack()}
+      />
 
       {/* Tab Navigation */}
       <View style={styles.tabContainer}>
@@ -514,8 +579,8 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
         >
           <Ionicons 
             name="settings-outline" 
-            size={22} 
-            color={activeTab === 'settings' ? '#FF6B35' : Theme.colors.textSecondary} 
+            size={20} 
+            color={activeTab === 'settings' ? '#FFF' : '#666'} 
           />
           <Text style={[styles.tabText, activeTab === 'settings' && styles.activeTabText]}>
             Settings
@@ -528,8 +593,8 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
         >
           <Ionicons 
             name="chatbubbles-outline" 
-            size={22} 
-            color={activeTab === 'chat' ? '#FF6B35' : Theme.colors.textSecondary} 
+            size={20} 
+            color={activeTab === 'chat' ? '#FFF' : '#666'} 
           />
           <Text style={[styles.tabText, activeTab === 'chat' && styles.activeTabText]}>
             Chat
@@ -542,8 +607,8 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
         >
           <Ionicons 
             name="trophy-outline" 
-            size={22} 
-            color={activeTab === 'leaderboard' ? '#FF6B35' : Theme.colors.textSecondary} 
+            size={20} 
+            color={activeTab === 'leaderboard' ? '#FFF' : '#666'} 
           />
           <Text style={[styles.tabText, activeTab === 'leaderboard' && styles.activeTabText]}>
             Leaderboard
@@ -574,75 +639,45 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#212529', // Dark theme background
-  },
-  
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: Theme.layout.screenPadding,
-    borderBottomWidth: 1,
-    borderBottomColor: '#374151', // Darker border
-    backgroundColor: '#374151', // Dark header background
-  },
-  
-  headerInfo: {
-    flex: 1,
-    alignItems: 'center',
-    marginHorizontal: Theme.spacing.md,
-  },
-  
-  groupName: {
-    ...Theme.typography.h4,
-    marginBottom: Theme.spacing.xs,
-    textAlign: 'center',
-    fontWeight: '700',
-    color: Theme.colors.white, // White text
-  },
-  
-  groupGoal: {
-    ...Theme.typography.bodySmall,
-    color: '#9CA3AF', // Light grey text
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  
-  headerPlaceholder: {
-    width: 24,
+    backgroundColor: '#F1F0ED',
   },
   
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#374151', // Dark tab background
-    borderBottomWidth: 1,
-    borderBottomColor: '#4B5563', // Darker border
-    paddingHorizontal: Theme.spacing.md,
+    backgroundColor: '#F1F0ED',
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 4,
   },
   
   tabButton: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: Theme.spacing.md,
-    borderBottomWidth: 3,
-    borderBottomColor: 'transparent',
-    marginHorizontal: Theme.spacing.xs,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    backgroundColor: '#FFF',
+    marginHorizontal: 4,
+    borderRadius: 12,
+    gap: 4,
+    ...Theme.shadows.sm,
+    shadowOpacity: 0.06,
+    elevation: 1,
   },
   
   activeTabButton: {
-    borderBottomColor: '#FF6B35', // Orange accent
+    backgroundColor: '#FF6B35',
   },
   
   tabText: {
-    ...Theme.typography.bodySmall,
-    color: '#9CA3AF', // Light grey text
-    fontWeight: '500',
-    fontSize: 14,
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '600',
   },
   
   activeTabText: {
-    color: '#FF6B35', // Orange accent
-    fontWeight: '600',
+    color: '#FFF',
+    fontWeight: '700',
   },
   
   content: {
@@ -651,12 +686,12 @@ const styles = StyleSheet.create({
   
   messagesList: {
     paddingHorizontal: Theme.spacing.md,
-    paddingBottom: Theme.spacing.md,
+    paddingVertical: Theme.spacing.md,
   },
   
   messageContainer: {
     flexDirection: 'row',
-    marginBottom: Theme.spacing.sm,
+    marginBottom: Theme.spacing.md,
     alignItems: 'flex-end',
   },
   
@@ -671,22 +706,23 @@ const styles = StyleSheet.create({
   },
   
   messageBubble: {
-    backgroundColor: '#374151', // Dark card background
+    backgroundColor: '#FFF',
     borderRadius: 16,
-    paddingHorizontal: Theme.spacing.sm,
-    paddingVertical: Theme.spacing.xs,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     maxWidth: '75%',
-    minHeight: 32,
     ...Theme.shadows.sm,
+    shadowOpacity: 0.08,
+    elevation: 1,
   },
   
   ownMessageBubble: {
-    backgroundColor: '#FF6B35', // Orange accent
+    backgroundColor: '#FF6B35',
   },
   
   messageUserName: {
     ...Theme.typography.caption,
-    color: '#9CA3AF', // Light grey text
+    color: '#666666', // Dark grey text
     marginBottom: Theme.spacing.xs,
     fontWeight: '600',
     fontSize: 11,
@@ -694,7 +730,7 @@ const styles = StyleSheet.create({
   
   messageText: {
     ...Theme.typography.body,
-    color: Theme.colors.white, // White text
+    color: '#000000', // Black text
     lineHeight: 16,
     fontSize: 14,
   },
@@ -712,7 +748,7 @@ const styles = StyleSheet.create({
   
   messageTime: {
     ...Theme.typography.caption,
-    color: '#6B7280', // Darker grey text
+    color: '#999999', // Grey text
     marginTop: Theme.spacing.xs,
     alignSelf: 'flex-end',
     fontSize: 10,
@@ -725,83 +761,57 @@ const styles = StyleSheet.create({
   
   chatInputContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    padding: Theme.spacing.md,
-    backgroundColor: '#374151', // Dark input background
-    borderTopWidth: 1,
-    borderTopColor: '#4B5563', // Darker border
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#F1F0ED',
   },
   
   cameraButton: {
-    padding: Theme.spacing.sm,
-    marginRight: Theme.spacing.sm,
-    backgroundColor: '#FFF3E0', // Light orange background
-    borderRadius: 20,
-    width: 40,
-    height: 40,
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    ...Theme.shadows.sm,
+    shadowOpacity: 0.06,
+    elevation: 1,
   },
   
   messageInput: {
     flex: 1,
-    backgroundColor: '#4B5563', // Darker input field
-    borderRadius: 20,
-    paddingHorizontal: Theme.spacing.md,
-    paddingVertical: Theme.spacing.sm,
-    maxHeight: 80,
-    minHeight: 40,
-    color: Theme.colors.white, // White text
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingTop: 13,
+    paddingBottom: 13,
+    maxHeight: 100,
+    height: 44,
+    color: '#000',
     fontSize: 15,
-    borderWidth: 1,
-    borderColor: '#6B7280', // Dark border
+    textAlignVertical: 'center',
+    ...Theme.shadows.sm,
+    shadowOpacity: 0.06,
+    elevation: 1,
   },
   
   sendButton: {
-    backgroundColor: '#FF6B35', // Orange accent
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    backgroundColor: '#FF6B35',
+    width: 44,
+    height: 44,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: Theme.spacing.sm,
     ...Theme.shadows.sm,
+    shadowOpacity: 0.1,
+    elevation: 2,
   },
   
   sendButtonDisabled: {
-    backgroundColor: '#4B5563', // Dark grey when disabled
-  },
-  
-  placeholderContent: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: Theme.layout.screenPadding,
-  },
-  
-  placeholderTitle: {
-    ...Theme.typography.h3,
-    marginTop: Theme.spacing.lg,
-    marginBottom: Theme.spacing.sm,
-    color: '#9CA3AF', // Light grey text
-  },
-  
-  placeholderSubtitle: {
-    ...Theme.typography.bodySmall,
-    color: '#6B7280', // Darker grey text
-    textAlign: 'center',
-  },
-  
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  
-  loadingText: {
-    ...Theme.typography.bodySmall,
-    color: '#9CA3AF', // Light grey text
-    marginTop: Theme.spacing.md,
+    backgroundColor: '#CCC',
+    opacity: 0.5,
   },
   
   errorContainer: {
@@ -818,48 +828,71 @@ const styles = StyleSheet.create({
   // Leaderboard Styles
   leaderboardContainer: {
     flex: 1,
-    padding: Theme.spacing.md,
+    padding: 16,
   },
   
   leaderboardTitle: {
-    ...Theme.typography.h2,
-    color: Theme.colors.white,
+    fontSize: 20,
+    color: '#FF6B35',
     textAlign: 'center',
-    marginBottom: Theme.spacing.xs,
+    marginBottom: 4,
+    fontWeight: '700',
   },
   
   leaderboardSubtitle: {
-    ...Theme.typography.bodySmall,
-    color: Theme.colors.textSecondary,
+    fontSize: 13,
+    color: '#666',
     textAlign: 'center',
-    marginBottom: Theme.spacing.lg,
+    marginBottom: 20,
+    fontWeight: '500',
+  },
+  
+  emptyLeaderboard: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  
+  emptyLeaderboardText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 12,
+    fontWeight: '600',
+  },
+  
+  emptyLeaderboardSubtext: {
+    fontSize: 13,
+    color: '#999',
+    marginTop: 4,
   },
   
   leaderboardItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#374151',
-    padding: Theme.spacing.md,
-    marginBottom: Theme.spacing.sm,
-    borderRadius: Theme.borderRadius.md,
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF6B35',
+    backgroundColor: '#FFF',
+    padding: 12,
+    marginBottom: 8,
+    borderRadius: 12,
+    ...Theme.shadows.sm,
+    shadowOpacity: 0.06,
+    elevation: 1,
   },
   
   rankContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#FF6B35',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: Theme.spacing.md,
+    marginRight: 12,
   },
   
   rankText: {
-    ...Theme.typography.h3,
-    color: Theme.colors.white,
-    fontWeight: 'bold',
+    fontSize: 16,
+    color: '#FFF',
+    fontWeight: '700',
   },
   
   leaderboardAvatar: {
@@ -872,14 +905,14 @@ const styles = StyleSheet.create({
   
   leaderboardName: {
     ...Theme.typography.body,
-    color: Theme.colors.white,
+    color: '#000000',
     fontWeight: '600',
     marginBottom: Theme.spacing.xs,
   },
   
   leaderboardStreak: {
     ...Theme.typography.caption,
-    color: Theme.colors.textSecondary,
+    color: '#666666',
   },
   
   pointsContainer: {
@@ -894,35 +927,141 @@ const styles = StyleSheet.create({
   
   pointsLabel: {
     ...Theme.typography.caption,
-    color: Theme.colors.textSecondary,
+    color: '#666666',
     textTransform: 'uppercase',
   },
   
   // Settings Styles
   settingsContainer: {
     flex: 1,
-    padding: Theme.spacing.md,
   },
   
-  settingsTitle: {
-    ...Theme.typography.h2,
-    color: Theme.colors.white,
-    textAlign: 'center',
-    marginBottom: Theme.spacing.xl,
+  settingsContent: {
+    padding: 16,
+    paddingBottom: 40,
   },
   
-  settingsSection: {
-    backgroundColor: '#374151',
-    padding: Theme.spacing.md,
-    borderRadius: Theme.borderRadius.md,
-    marginBottom: Theme.spacing.lg,
+  settingsCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    ...Theme.shadows.sm,
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 1,
   },
   
-  sectionTitle: {
-    ...Theme.typography.h4,
-    color: Theme.colors.white,
-    marginBottom: Theme.spacing.md,
+  cardLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#999',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  
+  cardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  
+  cardCount: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FF6B35',
+  },
+  
+  membersList: {
+    gap: 12,
+  },
+  
+  memberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  
+  memberNameText: {
+    fontSize: 16,
     fontWeight: '600',
+    color: '#333',
+  },
+  
+  challengesList: {
+    gap: 10,
+  },
+  
+  challengeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+  },
+  
+  challengeIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#FFF3E0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  
+  challengeInfo: {
+    flex: 1,
+  },
+  
+  challengeNameText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 2,
+  },
+  
+  challengeTypeText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#666',
+  },
+  
+  emptyText: {
+    fontSize: 14,
+    color: '#999',
+    fontStyle: 'italic',
+  },
+  
+  statsGrid: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 12,
+  },
+  
+  statsCardSmall: {
+    flex: 1,
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    ...Theme.shadows.sm,
+    shadowOpacity: 0.06,
+    elevation: 1,
+  },
+  
+  statsNumber: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#000',
+    marginTop: 6,
+  },
+  
+  statsLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 2,
   },
   
   rewardItem: {
@@ -933,7 +1072,7 @@ const styles = StyleSheet.create({
   
   rewardText: {
     ...Theme.typography.body,
-    color: Theme.colors.white,
+    color: '#000000',
     marginLeft: Theme.spacing.sm,
   },
   
@@ -945,7 +1084,7 @@ const styles = StyleSheet.create({
   
   penaltyText: {
     ...Theme.typography.body,
-    color: Theme.colors.white,
+    color: '#000000',
     marginLeft: Theme.spacing.sm,
   },
   
@@ -954,80 +1093,68 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FF6B35',
-    paddingVertical: Theme.spacing.md,
-    paddingHorizontal: Theme.spacing.lg,
-    borderRadius: Theme.borderRadius.md,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
     ...Theme.shadows.sm,
+    shadowOpacity: 0.1,
+    gap: 8,
   },
   
   inviteButtonText: {
-    ...Theme.typography.button,
-    color: Theme.colors.white,
-    marginLeft: Theme.spacing.sm,
-    fontWeight: '600',
-  },
-  
-  infoItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Theme.spacing.sm,
+    fontSize: 15,
+    color: '#FFF',
+    fontWeight: '700',
   },
   
   infoLabel: {
-    ...Theme.typography.body,
-    color: Theme.colors.textSecondary,
+    fontSize: 13,
+    color: '#888888',
+    fontWeight: '500',
+    marginBottom: 2,
   },
   
   infoValue: {
-    ...Theme.typography.body,
-    color: Theme.colors.white,
-    fontWeight: '600',
+    fontSize: 15,
+    color: '#000000',
+    fontWeight: '700',
   },
   
   // Check-In Message Styles
   checkInContent: {
-    marginBottom: Theme.spacing.sm,
-    backgroundColor: '#374151',
-    borderRadius: Theme.borderRadius.lg,
-    padding: Theme.spacing.sm,
-    borderWidth: 1,
-    borderColor: '#4B5563',
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    overflow: 'hidden',
   },
   
-  checkInHeader: {
-    marginBottom: Theme.spacing.sm,
-    paddingBottom: Theme.spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: '#4B5563',
+  challengeTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#FFF3E0',
   },
   
-  checkInTitle: {
-    ...Theme.typography.h4,
+  challengeTitle: {
+    fontSize: 14,
     color: '#FF6B35',
-    fontWeight: 'bold',
-    marginBottom: Theme.spacing.xs,
-  },
-  
-  checkInDate: {
-    ...Theme.typography.caption,
-    color: Theme.colors.textSecondary,
-    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
   },
   
   checkInImage: {
     width: '100%',
-    height: 180,
-    borderRadius: Theme.borderRadius.md,
-    marginBottom: Theme.spacing.sm,
+    height: 200,
     resizeMode: 'cover',
   },
   
-  checkInCaption: {
-    ...Theme.typography.body,
-    color: Theme.colors.white,
-    marginBottom: Theme.spacing.sm,
-    lineHeight: 18,
+  checkInNote: {
+    fontSize: 14,
+    color: '#333',
+    padding: 12,
+    lineHeight: 20,
+    fontWeight: '500',
   },
   
   checkInMessageBubble: {
@@ -1039,44 +1166,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
-    paddingTop: Theme.spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: '#4B5563',
-    marginTop: Theme.spacing.sm,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#F8F8F8',
   },
   
   voteButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: Theme.spacing.xs,
-    paddingHorizontal: Theme.spacing.sm,
-    borderRadius: Theme.borderRadius.sm,
-    backgroundColor: 'transparent',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#FFF',
   },
   
   aiJudgeButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: Theme.spacing.xs,
-    paddingHorizontal: Theme.spacing.md,
-    borderRadius: Theme.borderRadius.sm,
-    backgroundColor: 'rgba(255, 107, 53, 0.1)',
-    borderWidth: 1,
-    borderColor: '#FF6B35',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#FF6B35',
   },
   
   aiJudgeButtonText: {
-    ...Theme.typography.caption,
-    color: '#FF6B35',
-    marginLeft: Theme.spacing.xs,
+    color: '#FFF',
     fontWeight: '600',
-    fontSize: 12,
+    fontSize: 11,
   },
   
   voteCount: {
-    ...Theme.typography.caption,
-    color: Theme.colors.textSecondary,
-    marginLeft: Theme.spacing.xs,
+    color: '#666',
+    marginLeft: 6,
     fontWeight: '600',
     fontSize: 12,
   },
@@ -1094,19 +1215,34 @@ const styles = StyleSheet.create({
   
   requirementText: {
     ...Theme.typography.body,
-    color: Theme.colors.white,
+    color: '#000000',
     marginLeft: Theme.spacing.sm,
   },
   
   noRequirementsText: {
     ...Theme.typography.body,
-    color: Theme.colors.textSecondary,
+    color: '#666666',
     fontStyle: 'italic',
   },
   
-  noRewardsText: {
-    ...Theme.typography.body,
-    color: Theme.colors.textSecondary,
-    fontStyle: 'italic',
+  descriptionText: {
+    fontSize: 16,
+    color: '#333',
+    lineHeight: 24,
+    fontWeight: '400',
+  },
+  
+  infoText: {
+    fontSize: 15,
+    color: '#000000',
+    marginBottom: Theme.spacing.xs,
+    fontWeight: '500',
+  },
+  
+  infoSubtext: {
+    fontSize: 13,
+    color: '#888888',
+    lineHeight: 18,
+    marginTop: Theme.spacing.xs,
   },
 }); 

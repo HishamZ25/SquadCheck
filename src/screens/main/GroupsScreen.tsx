@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,11 +8,13 @@ import {
   TouchableOpacity,
   Alert,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Theme } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { GroupService } from '../../services/groupService';
 import { AuthService } from '../../services/authService';
 import { Avatar } from '../../components/common/Avatar';
+import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { Group, User } from '../../types';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../services/firebase';
@@ -25,55 +27,133 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
   const [groups, setGroups] = useState<Group[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [initialLoad, setInitialLoad] = useState(true);
   const [groupMembers, setGroupMembers] = useState<Record<string, User[]>>({});
+  const [groupsCache, setGroupsCache] = useState<Group[] | null>(null);
 
+  // Load user on mount
   useEffect(() => {
-    loadGroups();
+    loadUser();
   }, []);
 
-  const loadGroups = async () => {
+  const loadUser = async () => {
     try {
-      setLoading(true);
       const currentUser = await AuthService.getCurrentUser();
-      console.log('👤 Current user:', currentUser?.id, currentUser?.displayName);
-      
       if (currentUser) {
         setUser(currentUser);
-        const userGroups = await GroupService.getUserGroups(currentUser.id);
-        console.log('📋 Groups returned from service:', userGroups.length);
-        console.log('📋 Groups data:', userGroups.map(g => ({ id: g.id, name: g.name, memberIds: g.memberIds })));
-        
-        setGroups(userGroups);
-        
-        // Load members for each group
-        await loadGroupMembers(userGroups);
       }
+    } catch (error) {
+      console.error('Error loading user:', error);
+    }
+  };
+
+  // Prefetch groups and members on app load
+  useEffect(() => {
+    if (user && !groupsCache) {
+      prefetchGroups();
+    }
+  }, [user]);
+
+  // Load groups when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (user) {
+        // Use cache if available, otherwise load
+        if (groupsCache) {
+          console.log('Using cached groups data');
+          setGroups(groupsCache);
+          setLoading(false);
+          setInitialLoad(false);
+        } else {
+          loadGroups();
+        }
+      }
+    }, [user, groupsCache])
+  );
+
+  const prefetchGroups = async () => {
+    if (!user) return;
+    
+    try {
+      console.log('Prefetching groups...');
+      const userGroups = await GroupService.getUserGroups(user.id);
+      
+      // Load members for each group (in parallel)
+      await loadGroupMembers(userGroups);
+      
+      setGroupsCache(userGroups);
+      setGroups(userGroups);
+      console.log('Groups prefetched successfully');
+    } catch (error) {
+      console.error('Error prefetching groups:', error);
+      // Don't throw - prefetch is an optimization
+    } finally {
+      setLoading(false);
+      setInitialLoad(false);
+    }
+  };
+
+  const loadGroups = async () => {
+    if (!user) return;
+    
+    try {
+      setLoading(true);
+      
+      const userGroups = await GroupService.getUserGroups(user.id);
+      console.log('📋 Groups returned from service:', userGroups.length);
+      
+      setGroups(userGroups);
+      setGroupsCache(userGroups);
+      
+      // Load members for each group (in parallel)
+      await loadGroupMembers(userGroups);
     } catch (error) {
       console.error('❌ Error loading groups:', error);
       Alert.alert('Error', 'Failed to load groups');
     } finally {
       setLoading(false);
+      setInitialLoad(false);
     }
   };
 
   const loadGroupMembers = async (groups: Group[]) => {
     try {
-      const membersMap: Record<string, User[]> = {};
+      // Collect all unique member IDs across all groups
+      const allMemberIds = new Set<string>();
+      groups.forEach(group => {
+        group.memberIds.forEach(id => allMemberIds.add(id));
+      });
       
-      for (const group of groups) {
-        const members: User[] = [];
-        for (const memberId of group.memberIds) {
-          try {
-            const userDoc = await getDoc(doc(db, 'users', memberId));
-            if (userDoc.exists()) {
-              members.push(userDoc.data() as User);
-            }
-          } catch (error) {
-            console.error('Error loading member:', error);
+      // Fetch all members in parallel
+      const memberPromises = Array.from(allMemberIds).map(async (memberId) => {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', memberId));
+          if (userDoc.exists()) {
+            return { id: memberId, data: userDoc.data() as User };
           }
+        } catch (error) {
+          console.error('Error loading member:', memberId, error);
         }
-        membersMap[group.id] = members;
-      }
+        return null;
+      });
+      
+      const memberResults = await Promise.all(memberPromises);
+      
+      // Build a member lookup map
+      const memberLookup: Record<string, User> = {};
+      memberResults.forEach(result => {
+        if (result) {
+          memberLookup[result.id] = result.data;
+        }
+      });
+      
+      // Build the members map for each group
+      const membersMap: Record<string, User[]> = {};
+      groups.forEach(group => {
+        membersMap[group.id] = group.memberIds
+          .map(id => memberLookup[id])
+          .filter(Boolean);
+      });
       
       setGroupMembers(membersMap);
     } catch (error) {
@@ -81,120 +161,102 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
     }
   };
 
-  const renderGroup = ({ item }: { item: Group }) => (
-    <TouchableOpacity 
-      style={styles.groupCard}
-      onPress={() => navigation.navigate('GroupChat', { groupId: item.id })}
-    >
-      {/* Header with overlapping profile circles */}
-      <View style={styles.groupHeader}>
-        <View style={styles.groupInfo}>
-          <Text style={styles.groupName}>{item.name}</Text>
-          <Text style={styles.groupGoal}>{item.goal}</Text>
-        </View>
-        
-        <View style={styles.membersContainer}>
+  const renderGroup = ({ item }: { item: Group }) => {
+    const maxAvatars = 5;
+    const members = groupMembers[item.id] || [];
+    const displayMembers = members.slice(0, maxAvatars);
+    const extraCount = Math.max(0, item.memberIds.length - maxAvatars);
+    
+    return (
+      <TouchableOpacity 
+        style={styles.groupCard}
+        onPress={() => navigation.navigate('GroupChat', { groupId: item.id })}
+      >
+        {/* Top Row: Overlapping Avatars on Left, Challenge Badge on Right */}
+        <View style={styles.topRow}>
           <View style={styles.overlappingAvatars}>
-            {groupMembers[item.id]?.slice(0, 3).map((member, index) => (
+            {displayMembers.map((member, index) => (
               <View 
                 key={member.id} 
                 style={[
                   styles.avatarCircle,
                   { 
-                    zIndex: 3 - index,
-                    marginLeft: index > 0 ? -15 : 0 
+                    zIndex: maxAvatars - index,
+                    marginLeft: index > 0 ? -10 : 0 
                   }
                 ]}
               >
                 <Avatar
                   source={member.photoURL}
-                  initials={member.displayName.charAt(0).toUpperCase()}
+                  initials={member.displayName?.charAt(0)?.toUpperCase() || '?'}
                   size="sm"
                 />
               </View>
             ))}
-            {item.memberIds.length > 3 && (
-              <View style={[styles.avatarCircle, styles.moreMembers]}>
-                <Text style={styles.moreMembersText}>+{item.memberIds.length - 3}</Text>
+            {extraCount > 0 && (
+              <View 
+                style={[
+                  styles.avatarCircle,
+                  styles.extraAvatarBadge,
+                  { marginLeft: -10 }
+                ]}
+              >
+                <Text style={styles.extraAvatarText}>+{extraCount}</Text>
               </View>
             )}
           </View>
-        </View>
-      </View>
-
-      {/* Requirements section */}
-      <View style={styles.requirementsSection}>
-        <Text style={styles.requirementsTitle}>Requirements:</Text>
-        {item.requirements.map((requirement, index) => (
-          <View key={index} style={styles.requirementRow}>
-            <Text style={styles.bulletPoint}>•</Text>
-            <Text style={styles.requirementText}>{requirement}</Text>
+          
+          {/* Challenge Badge */}
+          <View style={styles.challengeBadge}>
+            <Ionicons name="trophy" size={16} color="#FFB800" />
+            <Text style={styles.challengeCount}>0</Text>
           </View>
-        ))}
-      </View>
+        </View>
 
-      {/* Group stats */}
-      <View style={styles.groupStats}>
-        <View style={styles.statItem}>
-          <Ionicons name="people" size={16} color={Theme.colors.secondary} />
-          <Text style={styles.statText}>{item.memberIds.length} members</Text>
+        {/* Middle: Group Info */}
+        <View style={styles.groupContent}>
+          <Text style={styles.groupName}>{item.name}</Text>
         </View>
-        <View style={styles.statItem}>
-          <Ionicons name="diamond" size={16} color={Theme.colors.points} />
-          <Text style={styles.statText}>{item.rewards.points} pts</Text>
-        </View>
-        <View style={styles.statItem}>
-          <Ionicons name="trophy" size={16} color={Theme.colors.primary} />
-          <Text style={styles.statText}>{item.groupType}</Text>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Ionicons name="refresh" size={32} color={Theme.colors.gray400} />
-          <Text style={styles.loadingText}>Loading groups...</Text>
-        </View>
-      </SafeAreaView>
+      </TouchableOpacity>
     );
+  };
+
+  if (loading && initialLoad) {
+    return <LoadingSpinner text="Loading groups..." />;
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>My Groups</Text>
-        <TouchableOpacity 
-          style={styles.createButton}
-                      onPress={() => navigation.navigate('GroupType')}
-        >
-          <Ionicons name="add" size={24} color={Theme.colors.white} />
-        </TouchableOpacity>
-      </View>
-
       {groups.length === 0 ? (
         <View style={styles.emptyState}>
-          <Ionicons name="people-outline" size={64} color={Theme.colors.gray400} />
+          <Ionicons name="people-outline" size={48} color="#666666" />
           <Text style={styles.emptyTitle}>No Groups Yet</Text>
           <Text style={styles.emptySubtitle}>Create your first accountability group to get started!</Text>
-          <TouchableOpacity 
-            style={styles.createFirstButton}
-            onPress={() => navigation.navigate('GroupType')}
-          >
-            <Text style={styles.createFirstButtonText}>Create Group</Text>
-          </TouchableOpacity>
         </View>
       ) : (
         <FlatList
           data={groups}
           renderItem={renderGroup}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.groupsList}
+          contentContainerStyle={[styles.groupsList, styles.listContent]}
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      {/* Floating Action Button - Create Group */}
+      <View style={styles.fabContainer}>
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => navigation.navigate('CreateSimpleGroup')}
+          activeOpacity={0.8}
+        >
+          <Ionicons 
+            name="add" 
+            size={24} 
+            color="#FF6B35" 
+          />
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 };
@@ -202,79 +264,38 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#212529', // Dark theme background
+    backgroundColor: '#F1F0ED',
+    position: 'relative',
   },
   
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Theme.layout.screenPadding,
-    paddingVertical: Theme.spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: '#374151', // Darker border
-    backgroundColor: '#374151', // Dark header background
-  },
-  
-  title: {
-    ...Theme.typography.h2,
-    color: Theme.colors.white, // White text like CreateGroupScreen
-    fontWeight: '700',
-  },
-  
-  createButton: {
-    backgroundColor: '#FF6B35', // Orange accent like CreateGroupScreen
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Theme.shadows.sm,
-  },
   
   groupsList: {
     padding: Theme.layout.screenPadding,
   },
   
+  listContent: {
+    paddingBottom: 100, // Account for FAB + tab bar
+  },
+  
   groupCard: {
-    backgroundColor: '#374151', // Dark card background
-    borderRadius: Theme.borderRadius.lg,
-    padding: Theme.layout.cardPadding,
-    marginBottom: Theme.spacing.md,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
     ...Theme.shadows.sm,
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF6B35', // Orange accent border
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+    borderWidth: 2,
+    borderColor: '#FF6B35',
   },
   
-  groupHeader: {
+  topRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: Theme.spacing.md,
-  },
-  
-  groupInfo: {
-    flex: 1,
-    marginRight: Theme.spacing.md,
-  },
-  
-  groupName: {
-    ...Theme.typography.h4,
-    color: Theme.colors.white, // White text
-    fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: Theme.spacing.xs,
-  },
-  
-  groupGoal: {
-    ...Theme.typography.body,
-    color: '#9CA3AF', // Light grey text like CreateGroupScreen
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  
-  membersContainer: {
-    alignItems: 'flex-end',
+    marginBottom: 10,
   },
   
   overlappingAvatars: {
@@ -283,87 +304,58 @@ const styles = StyleSheet.create({
   },
   
   avatarCircle: {
-    borderWidth: 2,
-    borderColor: '#FF6B35', // Orange accent border
-    borderRadius: 20,
-    backgroundColor: Theme.colors.white,
+    borderWidth: 2.5,
+    borderColor: '#FFFFFF',
+    borderRadius: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
   },
   
-  moreMembers: {
-    width: 40,
-    height: 40,
+  extraAvatarBadge: {
+    width: 36,
+    height: 36,
+    backgroundColor: '#FF6B35',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#4B5563', // Darker grey
   },
   
-  moreMembersText: {
-    ...Theme.typography.caption,
-    color: '#9CA3AF', // Light grey text
-    fontWeight: '600',
+  extraAvatarText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   
-  requirementsSection: {
-    marginBottom: Theme.spacing.md,
-  },
-  
-  requirementsTitle: {
-    ...Theme.typography.bodySmall,
-    color: '#9CA3AF', // Light grey text
-    fontWeight: '600',
-    marginBottom: Theme.spacing.xs,
-  },
-  
-  requirementRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: Theme.spacing.xs,
-  },
-  
-  bulletPoint: {
-    fontSize: 28,
-    color: '#FF6B35', // Orange accent like CreateGroupScreen
-    marginRight: Theme.spacing.sm,
-    marginTop: 0,
-    fontWeight: 'bold',
-  },
-  
-  requirementText: {
-    ...Theme.typography.bodySmall,
-    color: '#9CA3AF', // Light grey text
-    flex: 1,
-    lineHeight: 18,
-  },
-  
-  groupStats: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingTop: Theme.spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: '#4B5563', // Darker border
-  },
-  
-  statItem: {
+  challengeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#FFF9E6',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: '#FFE8B3',
   },
   
-  statText: {
-    ...Theme.typography.caption,
-    color: '#9CA3AF', // Light grey text
-    marginLeft: Theme.spacing.xs,
+  challengeCount: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#333',
   },
   
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  groupContent: {
+    marginTop: 2,
   },
   
-  loadingText: {
-    ...Theme.typography.bodySmall,
-    color: '#9CA3AF', // Light grey text
-    marginTop: Theme.spacing.md,
+  groupName: {
+    fontSize: 17,
+    color: '#000000',
+    fontWeight: '700',
+    marginBottom: 3,
+    letterSpacing: -0.2,
   },
   
   emptyState: {
@@ -371,34 +363,46 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: Theme.layout.screenPadding,
+    paddingVertical: Theme.spacing.xl * 2,
   },
   
   emptyTitle: {
     ...Theme.typography.h3,
-    marginTop: Theme.spacing.lg,
+    marginTop: Theme.spacing.md,
     marginBottom: Theme.spacing.sm,
-    color: '#9CA3AF', // Light grey text
+    color: '#000000',
+    fontWeight: '700',
+    textAlign: 'center',
   },
   
   emptySubtitle: {
-    ...Theme.typography.bodySmall,
+    ...Theme.typography.body,
+    color: '#000000',
+    fontWeight: '600',
     textAlign: 'center',
-    color: '#6B7280', // Darker grey text
     marginBottom: Theme.spacing.xl,
     lineHeight: 20,
   },
   
-  createFirstButton: {
-    backgroundColor: '#FF6B35', // Orange accent
-    paddingHorizontal: Theme.spacing.xl,
-    paddingVertical: Theme.spacing.md,
-    borderRadius: Theme.borderRadius.lg,
-    ...Theme.shadows.sm,
+  fabContainer: {
+    position: 'absolute',
+    bottom: 90, // Account for tab bar height (~70px) + padding
+    right: Theme.layout.screenPadding,
+    width: 56,
+    height: 56,
+    zIndex: 1000,
   },
   
-  createFirstButtonText: {
-    ...Theme.typography.body,
-    color: Theme.colors.white,
-    fontWeight: '600',
+  fab: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#FF6B35',
+    ...Theme.shadows.lg,
+    zIndex: 1000,
   },
 }); 

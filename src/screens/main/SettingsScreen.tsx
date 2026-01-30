@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Alert,
 } from 'react-native';
+import { CommonActions } from '@react-navigation/native';
 import { Button } from '../../components/common/Button';
 import { Avatar } from '../../components/common/Avatar';
 import { Theme } from '../../constants/theme';
@@ -21,6 +22,7 @@ interface SettingsScreenProps {
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, route }) => {
   const user: User = route.params?.user;
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const handleLogout = async () => {
     Alert.alert(
@@ -36,11 +38,28 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
           style: 'destructive',
           onPress: async () => {
             try {
+              setIsLoggingOut(true);
+              console.log('Starting logout...');
+              
+              // Sign out from Firebase
               await AuthService.signOut();
-              // Navigation will automatically go back to login due to auth state change
-            } catch (error) {
+              console.log('SignOut successful');
+              
+              // Navigate to root and reset to Login
+              // Get parent navigator (root stack)
+              const rootNavigation = navigation.getParent() || navigation;
+              rootNavigation.dispatch(
+                CommonActions.reset({
+                  index: 0,
+                  routes: [{ name: 'Login' }],
+                })
+              );
+              
+            } catch (error: any) {
               console.error('Error logging out:', error);
-              Alert.alert('Error', 'Failed to logout. Please try again.');
+              setIsLoggingOut(false);
+              const errorMessage = error?.message || 'Failed to logout. Please try again.';
+              Alert.alert('Error', errorMessage);
             }
           },
         },
@@ -57,7 +76,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={Theme.colors.text} />
+          <Ionicons name="arrow-back" size={22} color="#000000" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Settings</Text>
         <View style={styles.headerSpacer} />
@@ -100,27 +119,27 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
       {/* Settings Options */}
       <View style={styles.settingsSection}>
         <TouchableOpacity style={styles.settingItem}>
-          <Ionicons name="person-outline" size={24} color={Theme.colors.textSecondary} />
+          <Ionicons name="person-outline" size={24} color="#666666" />
           <Text style={styles.settingText}>Edit Profile</Text>
-          <Ionicons name="chevron-forward" size={20} color={Theme.colors.textTertiary} />
+          <Ionicons name="chevron-forward" size={20} color="#999999" />
         </TouchableOpacity>
         
         <TouchableOpacity style={styles.settingItem}>
-          <Ionicons name="notifications-outline" size={24} color={Theme.colors.textSecondary} />
+          <Ionicons name="notifications-outline" size={24} color="#666666" />
           <Text style={styles.settingText}>Notifications</Text>
-          <Ionicons name="chevron-forward" size={20} color={Theme.colors.textTertiary} />
+          <Ionicons name="chevron-forward" size={20} color="#999999" />
         </TouchableOpacity>
         
         <TouchableOpacity style={styles.settingItem}>
-          <Ionicons name="shield-outline" size={24} color={Theme.colors.textSecondary} />
+          <Ionicons name="shield-outline" size={24} color="#666666" />
           <Text style={styles.settingText}>Privacy</Text>
-          <Ionicons name="chevron-forward" size={20} color={Theme.colors.textTertiary} />
+          <Ionicons name="chevron-forward" size={20} color="#999999" />
         </TouchableOpacity>
         
         <TouchableOpacity style={styles.settingItem}>
-          <Ionicons name="help-circle-outline" size={24} color={Theme.colors.textSecondary} />
+          <Ionicons name="help-circle-outline" size={24} color="#666666" />
           <Text style={styles.settingText}>Help & Support</Text>
-          <Ionicons name="chevron-forward" size={20} color={Theme.colors.textTertiary} />
+          <Ionicons name="chevron-forward" size={20} color="#999999" />
         </TouchableOpacity>
       </View>
 
@@ -132,6 +151,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
           variant="outline"
           style={styles.logoutButton}
           textStyle={styles.logoutButtonText}
+          disabled={isLoggingOut}
+          loading={isLoggingOut}
         />
       </View>
     </SafeAreaView>
@@ -141,7 +162,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Theme.colors.background,
+    backgroundColor: '#F1F0ED',
+    position: 'relative',
   },
   
   header: {
@@ -149,8 +171,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: Theme.layout.screenPadding,
-    borderBottomWidth: 1,
-    borderBottomColor: Theme.colors.border,
   },
   
   backButton: {
@@ -158,9 +178,11 @@ const styles = StyleSheet.create({
   },
   
   headerTitle: {
-    ...Theme.typography.h3,
-    color: Theme.colors.text,
-    fontWeight: '600',
+    ...Theme.typography.h2,
+    color: '#FF6B35',
+    fontWeight: '700',
+    flex: 1,
+    textAlign: 'center',
   },
   
   headerSpacer: {
@@ -178,21 +200,21 @@ const styles = StyleSheet.create({
     marginTop: Theme.spacing.md,
     marginBottom: Theme.spacing.xs,
     textAlign: 'center',
-    color: Theme.colors.text,
+    color: '#000000',
   },
   
   userTitle: {
     ...Theme.typography.body,
     marginBottom: Theme.spacing.sm,
     textAlign: 'center',
-    color: Theme.colors.textSecondary,
+    color: '#666666',
   },
   
   userEmail: {
     ...Theme.typography.bodySmall,
     marginBottom: Theme.spacing.lg,
     textAlign: 'center',
-    color: Theme.colors.textTertiary,
+    color: '#999999',
   },
   
   statsRow: {
@@ -241,7 +263,7 @@ const styles = StyleSheet.create({
   settingItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Theme.colors.card,
+    backgroundColor: '#F5F5F5',
     borderRadius: Theme.borderRadius.md,
     padding: Theme.spacing.md,
     marginBottom: Theme.spacing.sm,
@@ -251,7 +273,7 @@ const styles = StyleSheet.create({
   settingText: {
     ...Theme.typography.body,
     flex: 1,
-    color: Theme.colors.text,
+    color: '#000000',
   },
   
   logoutSection: {

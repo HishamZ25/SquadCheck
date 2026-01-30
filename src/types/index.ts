@@ -45,23 +45,129 @@ export interface UnlockedProfileIcon {
   unlockedAt: Date;
 }
 
+// Group: Simple collection of users
 export interface Group {
   id: string;
   name: string;
-  goal: string;
-  requirements: string[];
-  rewards: {
-    points: number;
-    title?: string;
-    picture?: string;
-    badge?: string;
-  };
-  penalty?: number;
-  creatorId: string;
   memberIds: string[];
+  createdBy: string;
   createdAt: Date;
-  status: 'active' | 'completed' | 'cancelled';
-  groupType: 'team' | 'solo';
+}
+
+// Challenge: New comprehensive schema
+export interface Challenge {
+  id: string;
+  groupId?: string | null;  // Optional for solo challenges
+
+  title: string;
+  description?: string;
+
+  type: 'standard' | 'progress' | 'elimination' | 'deadline';
+
+  cadence: {
+    unit: 'daily' | 'weekly';
+    requiredCount?: number;          // e.g. 3x per week
+    weekStartsOn?: 0 | 1 | 2 | 3 | 4 | 5 | 6;     // 1 = Monday
+  };
+
+  submission: {
+    inputType: 'boolean' | 'number' | 'text' | 'timer';
+    unitLabel?: string;              // "minutes", "pages", "pushups"
+    minValue?: number;
+    requireAttachment?: boolean;
+    attachmentTypes?: ('photo' | 'screenshot')[];
+    requireText?: boolean;
+    minTextLength?: number;
+  };
+
+  due: {
+    dueTimeLocal?: string;           // "23:59", "06:00"
+    timezoneMode: 'userLocal' | 'groupLocal';
+    deadlineDate?: string;           // YYYY-MM-DD (for deadline type)
+  };
+
+  rules?: {
+    progress?: {
+      startsAt: number;
+      increaseBy: number;
+      increaseUnit: 'week';
+      comparison: 'gte' | 'lte';
+    };
+
+    elimination?: {
+      strikesAllowed: number;        // 0 = instant elimination
+      eliminateOn: 'miss' | 'failedRequirement';
+    };
+
+    deadline?: {
+      targetValue?: number;
+      comparison?: 'gte' | 'lte';
+      progressMode: 'accumulate' | 'latest';
+    };
+  };
+
+  settings?: {
+    allowLateCheckIn?: boolean;
+    lateGraceMinutes?: number;
+  };
+
+  createdBy: string;
+  createdAt: Date;
+  isArchived?: boolean;
+}
+
+// CheckIn: Source of truth for progress
+export interface CheckIn {
+  id: string;
+  groupId?: string | null;  // Optional for solo challenges
+  challengeId: string;
+  userId: string;
+
+  period: {
+    unit: 'daily' | 'weekly';
+    dayKey?: string;                // YYYY-MM-DD
+    weekKey?: string;               // week start date YYYY-MM-DD
+  };
+
+  payload: {
+    booleanValue?: boolean;
+    numberValue?: number;
+    textValue?: string;
+    timerSeconds?: number;
+  };
+
+  attachments?: Array<{
+    type: 'photo' | 'screenshot';
+    storagePath: string;
+    downloadUrl?: string;
+    width?: number;
+    height?: number;
+  }>;
+
+  status: 'completed' | 'pending' | 'missed' | 'failed';
+
+  computed?: {
+    targetValue?: number;
+    metRequirement?: boolean;
+  };
+
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
+// ChallengeMember: Tracks elimination and strikes
+export interface ChallengeMember {
+  id: string;                     // `${challengeId}_${userId}`
+  challengeId: string;
+  groupId?: string | null;        // Optional for solo challenges
+  userId: string;
+
+  state: 'active' | 'eliminated';
+  strikes: number;
+  eliminatedAt?: Date;
+  lastEvaluatedPeriodKey?: string;
+
+  joinedAt: Date;
 }
 
 export interface GroupInvitation {
@@ -84,36 +190,6 @@ export interface Goal {
   startDate: Date;
   endDate?: Date;
   isCompleted: boolean;
-}
-
-export interface CheckIn {
-  id: string;
-  userId: string;
-  groupId: string;
-  goalId: string;
-  imageURL: string;
-  caption?: string;
-  timestamp: Date;
-  status: 'pending' | 'approved' | 'rejected' | 'ai-verified';
-  verifiedBy?: string;
-  verificationTimestamp?: Date;
-  aiVerdict?: AIVerdict;
-  disputes: Dispute[];
-}
-
-export interface AIVerdict {
-  isApproved: boolean;
-  confidence: number;
-  reasoning: string;
-  timestamp: Date;
-}
-
-export interface Dispute {
-  id: string;
-  userId: string;
-  reason: string;
-  timestamp: Date;
-  isResolved: boolean;
 }
 
 export interface Reward {
@@ -146,4 +222,19 @@ export interface Friendship {
   requestedBy: string;
   requestedAt: Date | string;
   acceptedAt?: Date | string;
+}
+
+export interface Reminder {
+  id: string;
+  userId: string;
+  title: string;
+  description: string;
+  frequency: 'daily' | 'weekly' | 'monthly';
+  // For daily: array of hours (0-23)
+  // For weekly: array of { day: number (0-6), hour: number (0-23) }
+  // For monthly: array of { day: number (1-31), hour: number (0-23) }
+  schedule: number[] | { day: number; hour: number }[];
+  isActive: boolean;
+  createdAt: Date;
+  lastTriggered?: Date;
 } 

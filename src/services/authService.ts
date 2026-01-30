@@ -56,7 +56,9 @@ export class AuthService {
   // Sign out
   static async signOut(): Promise<void> {
     try {
+      console.log('Calling Firebase signOut...');
       await signOut(auth);
+      console.log('Firebase signOut completed successfully');
     } catch (error) {
       console.error('Error signing out:', error);
       throw error;
@@ -67,41 +69,91 @@ export class AuthService {
   static async getCurrentUser(): Promise<User | null> {
     try {
       const user = auth.currentUser;
-      if (!user) return null;
+      if (!user) {
+        console.log('No authenticated user found');
+        return null;
+      }
 
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      if (userDoc.exists()) {
+      // Try to get user document from Firestore
+      let userDoc;
+      try {
+        userDoc = await getDoc(doc(db, 'users', user.uid));
+      } catch (error: any) {
+        // If permissions error, try to create the document
+        if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
+          console.log('Permission denied accessing user document, attempting to create...');
+          // Fall through to create user document
+        } else {
+          throw error;
+        }
+      }
+
+      // If document exists, return it
+      if (userDoc?.exists()) {
         const userData = userDoc.data() as User;
         // Ensure displayName is set from Firebase Auth if missing in Firestore
         if (!userData.displayName && user.displayName) {
           userData.displayName = user.displayName;
         }
+        // Ensure email is set
+        if (!userData.email && user.email) {
+          userData.email = user.email;
+        }
         return userData;
       }
       
-              // If no Firestore document exists, create one from Firebase Auth user
-        if (user.displayName) {
-          const userData: User = {
-            id: user.uid,
-            email: user.email || '',
-            displayName: user.displayName,
-            photoURL: DicebearService.generateAvatarUrl(user.displayName, 400), // Generate high-quality Dicebear PNG avatar
-            title: null,
-            badges: [],
-            unlockedTitles: [],
-            unlockedProfileIcons: [],
-            createdAt: new Date(),
-            lastActive: new Date(),
-          };
-          
-          // Save to Firestore for future use
-          await setDoc(doc(db, 'users', user.uid), userData);
-          return userData;
-        }
+      // If no Firestore document exists, create one from Firebase Auth user
+      // Use displayName if available, otherwise use email username or a default
+      const displayName = user.displayName || 
+                         (user.email ? user.email.split('@')[0] : 'User') ||
+                         'User';
       
-      return null;
-    } catch (error) {
+      const userData: User = {
+        id: user.uid,
+        email: user.email || '',
+        displayName,
+        photoURL: DicebearService.generateAvatarUrl(displayName, 400),
+        title: null,
+        badges: [],
+        unlockedTitles: [],
+        unlockedProfileIcons: [],
+        createdAt: new Date(),
+        lastActive: new Date(),
+      };
+      
+      // Save to Firestore for future use
+      try {
+        await setDoc(doc(db, 'users', user.uid), userData);
+        console.log('Created user document in Firestore:', user.uid);
+      } catch (error: any) {
+        // If we can't write to Firestore, still return the user data
+        // This allows the app to work even if Firestore rules are strict
+        console.warn('Could not create user document in Firestore:', error?.message);
+        // Return the user data anyway so the app can function
+      }
+      
+      return userData;
+    } catch (error: any) {
       console.error('Error getting current user:', error);
+      // If there's a permissions error, try to return basic user info from auth
+      const user = auth.currentUser;
+      if (user) {
+        const displayName = user.displayName || 
+                           (user.email ? user.email.split('@')[0] : 'User') ||
+                           'User';
+        return {
+          id: user.uid,
+          email: user.email || '',
+          displayName,
+          photoURL: DicebearService.generateAvatarUrl(displayName, 400),
+          title: null,
+          badges: [],
+          unlockedTitles: [],
+          unlockedProfileIcons: [],
+          createdAt: new Date(),
+          lastActive: new Date(),
+        };
+      }
       return null;
     }
   }

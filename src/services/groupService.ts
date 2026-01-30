@@ -18,33 +18,30 @@ import { db } from './firebase';
 import { Group, GroupInvitation, User } from '../types';
 
 export class GroupService {
-  // Create a new group
+  // Create a new group (simple: just name, description, and users)
   static async createGroup(
     name: string,
-    goal: string,
-    requirements: string[],
-    rewards: {
-      points: number;
-      title?: string;
-      picture?: string;
-      badge?: string;
-    },
-    penalty: number,
+    description: string,
     creatorId: string,
-    groupType: 'team' | 'solo' = 'team'
+    memberIds: string[] = []
   ): Promise<string> {
     try {
+      // Ensure creator is included in members
+      const allMemberIds = [creatorId, ...memberIds.filter(id => id !== creatorId)];
+      
+      // Groups must have more than one user
+      if (allMemberIds.length < 2) {
+        throw new Error('A group must have at least 2 members');
+      }
+
       const groupData: Omit<Group, 'id'> = {
         name,
-        goal,
-        requirements,
-        rewards,
-        penalty,
+        description,
         creatorId,
-        memberIds: [creatorId], // Creator is automatically a member
+        memberIds: allMemberIds,
+        challengeIds: [], // Start with no challenges
         createdAt: new Date(),
         status: 'active',
-        groupType,
       };
 
       const docRef = await addDoc(collection(db, 'groups'), groupData);
@@ -60,7 +57,12 @@ export class GroupService {
     try {
       const groupDoc = await getDoc(doc(db, 'groups', groupId));
       if (groupDoc.exists()) {
-        return { id: groupDoc.id, ...groupDoc.data() } as Group;
+        const data = groupDoc.data();
+        return { 
+          id: groupDoc.id, 
+          ...data,
+          createdAt: data.createdAt?.toDate() || new Date(),
+        } as Group;
       }
       return null;
     } catch (error) {
@@ -102,7 +104,8 @@ export class GroupService {
         console.log('📄 Group doc:', doc.id, 'memberIds:', data.memberIds, 'status:', data.status);
         return { 
           id: doc.id, 
-          ...data 
+          ...data,
+          createdAt: data.createdAt?.toDate() || new Date(),
         } as Group;
       });
       
@@ -244,7 +247,12 @@ export class GroupService {
   static subscribeToGroup(groupId: string, callback: (group: Group | null) => void) {
     return onSnapshot(doc(db, 'groups', groupId), (doc) => {
       if (doc.exists()) {
-        callback({ id: doc.id, ...doc.data() } as Group);
+        const data = doc.data();
+        callback({ 
+          id: doc.id, 
+          ...data,
+          createdAt: data.createdAt?.toDate() || new Date(),
+        } as Group);
       } else {
         callback(null);
       }
@@ -272,7 +280,8 @@ export class GroupService {
         console.log('📄 Subscription group doc:', doc.id, 'memberIds:', data.memberIds, 'status:', data.status);
         return { 
           id: doc.id, 
-          ...data 
+          ...data,
+          createdAt: data.createdAt?.toDate() || new Date(),
         } as Group;
       });
       

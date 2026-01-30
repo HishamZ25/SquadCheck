@@ -28,6 +28,7 @@ export interface GroupChatMessage {
   type: 'text' | 'image' | 'checkin';
   imageUrl?: string;
   caption?: string;
+  challengeTitle?: string;
   upvotes?: number;
   downvotes?: number;
 }
@@ -120,6 +121,9 @@ export class MessageService {
           type: data.type,
           imageUrl: data.imageUrl,
           caption: data.caption,
+          challengeTitle: data.challengeTitle,
+          upvotes: data.upvotes || 0,
+          downvotes: data.downvotes || 0,
         } as GroupChatMessage;
       });
     } catch (error) {
@@ -141,22 +145,33 @@ export class MessageService {
       limit(limitCount)
     );
 
-    return onSnapshot(messagesQuery, (querySnapshot) => {
-      const messages = querySnapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          text: data.text || '',
-          userId: data.userId,
-          userName: data.userName,
-          timestamp: data.timestamp?.toDate() || new Date(),
-          type: data.type,
-          imageUrl: data.imageUrl,
-          caption: data.caption,
-        } as GroupChatMessage;
-      });
-      callback(messages);
-    });
+    return onSnapshot(
+      messagesQuery, 
+      (querySnapshot) => {
+        const messages = querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            text: data.text || '',
+            userId: data.userId,
+            userName: data.userName,
+            timestamp: data.timestamp?.toDate() || new Date(),
+            type: data.type,
+            imageUrl: data.imageUrl,
+            caption: data.caption,
+            challengeTitle: data.challengeTitle,
+            upvotes: data.upvotes || 0,
+            downvotes: data.downvotes || 0,
+          } as GroupChatMessage;
+        });
+        callback(messages);
+      },
+      (error) => {
+        console.error('Error in messages snapshot listener:', error);
+        // Return empty array on error
+        callback([]);
+      }
+    );
   }
 
   // Delete a message (only for message sender or group admin)
@@ -214,7 +229,8 @@ export class MessageService {
     userId: string,
     userName: string,
     caption: string,
-    imageUrl?: string | null
+    imageUrl?: string | null,
+    challengeTitle?: string
   ): Promise<string> {
     try {
       const messageData = {
@@ -225,6 +241,7 @@ export class MessageService {
         type: 'checkin' as const,
         imageUrl: imageUrl || null,
         caption: caption,
+        challengeTitle: challengeTitle || '',
         upvotes: 0,
         downvotes: 0,
         timestamp: serverTimestamp(),

@@ -70,15 +70,12 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
         throw new Error('User not authenticated');
       }
 
+      // Navigation will be handled automatically by auth state change listener
+      // No need to navigate manually - the app will switch to main screens
       Alert.alert(
         'Success!',
         'Account created successfully. You can now create or join accountability groups!',
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.navigate('Login'),
-          },
-        ]
+        [{ text: 'OK' }]
       );
     } catch (error: any) {
       Alert.alert('Sign Up Failed', error.message || 'An error occurred during sign up');
@@ -88,7 +85,13 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
   };
 
   const handleSignIn = () => {
-    navigation.navigate('Login');
+    // Use goBack() to return to Login screen, or replace if we're the initial screen
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      // If we can't go back, use replace to switch to Login
+      navigation.replace('Login');
+    }
   };
 
   return (
@@ -99,7 +102,7 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
       >
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color={Theme.colors.text} />
+            <Ionicons name="arrow-back" size={22} color="#000000" />
           </TouchableOpacity>
           <View style={styles.logoContainer}>
             <Ionicons name="people-circle" size={64} color={Theme.colors.secondary} />
@@ -157,13 +160,11 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
             style={styles.signUpButton}
           />
 
-          <Button
-            title="Already have an account? Sign In"
-            onPress={handleSignIn}
-            variant="ghost"
-            fullWidth
-            style={styles.signInButton}
-          />
+          <TouchableOpacity onPress={handleSignIn} style={styles.signInLink}>
+            <Text style={styles.signInText}>
+              Already have an account? <Text style={styles.signInLinkText}>Sign In</Text>
+            </Text>
+          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -173,7 +174,8 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Theme.colors.background,
+    backgroundColor: '#F1F0ED',
+    position: 'relative',
   },
   
   content: {
@@ -193,9 +195,6 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
     padding: Theme.spacing.sm,
-    backgroundColor: Theme.colors.card,
-    borderRadius: Theme.borderRadius.md,
-    ...Theme.shadows.sm,
   },
   
   logoContainer: {
@@ -206,13 +205,14 @@ const styles = StyleSheet.create({
     ...Theme.typography.h2,
     marginBottom: Theme.spacing.sm,
     textAlign: 'center',
-    color: Theme.colors.text,
+    color: '#000000',
+    fontWeight: '700',
   },
   
   subtitle: {
     ...Theme.typography.bodySmall,
     textAlign: 'center',
-    color: Theme.colors.textSecondary,
+    color: '#000000',
   },
   
   form: {
@@ -225,7 +225,18 @@ const styles = StyleSheet.create({
     marginBottom: Theme.spacing.md,
   },
   
-  signInButton: {
-    marginTop: Theme.spacing.sm,
+  signInLink: {
+    marginTop: Theme.spacing.md,
+    alignItems: 'center',
+  },
+  signInText: {
+    ...Theme.typography.body,
+    color: '#000000',
+    textAlign: 'center',
+  },
+  signInLinkText: {
+    ...Theme.typography.body,
+    color: '#FF6B35',
+    fontWeight: '600',
   },
 }); 

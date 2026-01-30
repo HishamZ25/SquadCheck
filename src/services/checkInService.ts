@@ -217,4 +217,57 @@ export class CheckInService {
       callback(checkIns);
     });
   }
+
+  // NEW SCHEMA: Submit challenge check-in
+  static async submitChallengeCheckIn(
+    challengeId: string,
+    userId: string,
+    groupId: string | null,
+    cadenceUnit: 'daily' | 'weekly',
+    payload: {
+      booleanValue?: boolean;
+      numberValue?: number;
+      textValue?: string;
+      timerSeconds?: number;
+    },
+    attachments?: Array<{ type: 'photo' | 'screenshot'; uri: string }>
+  ): Promise<string> {
+    try {
+      const now = new Date();
+      const dayKey = now.toISOString().split('T')[0]; // YYYY-MM-DD
+      
+      // Calculate week key (ISO week format: YYYY-Wnn)
+      const startOfYear = new Date(now.getFullYear(), 0, 1);
+      const daysSinceStartOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24));
+      const weekNumber = Math.ceil((daysSinceStartOfYear + startOfYear.getDay() + 1) / 7);
+      const weekKey = `${now.getFullYear()}-W${String(weekNumber).padStart(2, '0')}`;
+
+      const period: any = {
+        unit: cadenceUnit,
+      };
+      
+      if (cadenceUnit === 'daily') {
+        period.dayKey = dayKey;
+      } else {
+        period.weekKey = weekKey;
+      }
+
+      const checkInData: any = {
+        challengeId,
+        userId,
+        groupId,
+        period,
+        payload,
+        attachments: attachments || [],
+        status: 'completed',
+        createdAt: Date.now(),
+      };
+
+      const docRef = await addDoc(collection(db, 'checkIns'), checkInData);
+      return docRef.id;
+    } catch (error) {
+      console.error('Error submitting challenge check-in:', error);
+      throw error;
+    }
+  }
 } 

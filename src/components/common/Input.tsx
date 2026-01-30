@@ -51,7 +51,7 @@ export const Input: React.FC<InputProps> = ({
         placeholder={placeholder}
         onFocus={handleFocus}
         onBlur={handleBlur}
-        placeholderTextColor={Theme.colors.textTertiary}
+        placeholderTextColor="#999999"
         {...textInputProps}
       />
       
@@ -72,19 +72,19 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 14,
     fontWeight: '600',
-    color: Theme.colors.text,
+    color: '#000000',
     marginBottom: Theme.spacing.xs,
   },
   
   input: {
     height: Theme.layout.inputHeight,
-    borderWidth: 1,
-    borderColor: Theme.colors.border,
+    borderWidth: 2,
+    borderColor: '#FF6B35',
     borderRadius: Theme.borderRadius.md,
     paddingHorizontal: Theme.spacing.md,
     fontSize: 16,
-    color: Theme.colors.text,
-    backgroundColor: Theme.colors.card,
+    color: '#000000',
+    backgroundColor: '#FFFFFF',
   },
   
   error: {

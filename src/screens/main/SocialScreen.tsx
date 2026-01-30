@@ -23,9 +23,8 @@ export const SocialScreen: React.FC<SocialScreenProps> = ({ navigation }) => {
         </View>
         
         <View style={styles.placeholder}>
-          <Ionicons name="construct-outline" size={64} color={Theme.colors.gray500} />
-          <Text style={styles.placeholderText}>Social Screen</Text>
-          <Text style={styles.placeholderSubtext}>Coming soon...</Text>
+          <Ionicons name="checkmark-circle-outline" size={48} color={Theme.colors.textSecondary} />
+          <Text style={styles.placeholderText}>Coming soon...</Text>
         </View>
       </View>
     </SafeAreaView>
@@ -35,7 +34,8 @@ export const SocialScreen: React.FC<SocialScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Theme.colors.background,
+    backgroundColor: '#F1F0ED',
+    position: 'relative',
   },
   
   content: {
@@ -43,6 +43,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: Theme.layout.screenPadding,
+    paddingBottom: 90, // Account for tab bar
   },
   
   header: {
@@ -55,28 +56,25 @@ const styles = StyleSheet.create({
     marginTop: Theme.spacing.md,
     marginBottom: Theme.spacing.sm,
     textAlign: 'center',
-    color: Theme.colors.text,
+    color: '#000000',
   },
   
   subtitle: {
     ...Theme.typography.bodySmall,
     textAlign: 'center',
-    color: Theme.colors.textSecondary,
+    color: '#666666',
   },
   
   placeholder: {
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Theme.spacing.xl * 2,
   },
   
   placeholderText: {
-    ...Theme.typography.h3,
-    marginTop: Theme.spacing.lg,
-    marginBottom: Theme.spacing.sm,
-    color: Theme.colors.textSecondary,
-  },
-  
-  placeholderSubtext: {
-    ...Theme.typography.bodySmall,
-    color: Theme.colors.textTertiary,
+    ...Theme.typography.body,
+    color: '#666666',
+    marginTop: Theme.spacing.md,
+    textAlign: 'center',
   },
 });
