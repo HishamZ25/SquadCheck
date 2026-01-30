@@ -42,6 +42,7 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
   unitLabel,
   navigation,
   onDaySelected,
+  challengeCreatedAt,
 }) => {
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -91,20 +92,50 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
     });
   };
 
-  const getPeriodStatus = (periodKey: string): 'completed' | 'partial' | 'missed' | 'empty' => {
+  const isValidChallengePeriod = (periodKey: string): boolean => {
+    const creationDate = typeof challengeCreatedAt === 'number' 
+      ? new Date(challengeCreatedAt) 
+      : challengeCreatedAt;
+    creationDate.setHours(0, 0, 0, 0);
+    
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    
+    if (cadenceUnit === 'daily') {
+      const periodDate = new Date(periodKey);
+      return periodDate >= creationDate && periodDate <= today;
+    } else {
+      const weekStart = dateKeys.parseKey(periodKey);
+      return weekStart >= creationDate && weekStart <= today;
+    }
+  };
+
+  const getPeriodStatus = (periodKey: string): 'completed' | 'partial' | 'missed' | 'empty' | 'invalid' => {
+    if (!isValidChallengePeriod(periodKey)) {
+      return 'invalid';
+    }
+    
     const checkIns = getCheckInsForPeriod(periodKey);
     const completedCount = checkIns.filter(ci => ci.status === 'completed').length;
 
     if (cadenceUnit === 'daily') {
-      return completedCount > 0 ? 'completed' : 'empty';
+      if (completedCount > 0) return 'completed';
+      
+      const periodDate = new Date(periodKey);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      return periodDate < today ? 'missed' : 'empty';
     } else {
       if (completedCount >= requiredCount) return 'completed';
       if (completedCount > 0) return 'partial';
-      return 'empty';
+      
+      const currentWeekKey = dateKeys.getWeekKey(new Date(), weekStartsOn);
+      return periodKey < currentWeekKey ? 'missed' : 'empty';
     }
   };
 
-  const getStatusConfig = (status: 'completed' | 'partial' | 'missed' | 'empty') => {
+  const getStatusConfig = (status: 'completed' | 'partial' | 'missed' | 'empty' | 'invalid') => {
     switch (status) {
       case 'completed':
         return { backgroundColor: '#4CAF50', icon: 'checkmark' as const, textColor: '#FFF' };
@@ -114,6 +145,8 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
         return { backgroundColor: '#F44336', icon: 'close' as const, textColor: '#FFF' };
       case 'empty':
         return { backgroundColor: '#F0F0F0', icon: null, textColor: '#999' };
+      case 'invalid':
+        return { backgroundColor: '#E0E0E0', icon: null, textColor: '#CCC' };
     }
   };
 
@@ -191,7 +224,8 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
                   key={periodKey}
                   style={styles.dayItem}
                   onPress={() => handlePeriodPress(periodKey)}
-                  activeOpacity={0.7}
+                  activeOpacity={status === 'invalid' ? 1 : 0.7}
+                  disabled={status === 'invalid'}
                 >
                   <Text style={[styles.dayName, isToday && styles.todayDayName]}>
                     {dayName}
@@ -219,6 +253,8 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
                   key={periodKey}
                   style={styles.weekItem}
                   onPress={() => handlePeriodPress(periodKey)}
+                  activeOpacity={status === 'invalid' ? 1 : 0.7}
+                  disabled={status === 'invalid'}
                 >
                   <View style={[styles.weekCircle, { backgroundColor: statusConfig.backgroundColor }]}>
                     {statusConfig.icon ? (

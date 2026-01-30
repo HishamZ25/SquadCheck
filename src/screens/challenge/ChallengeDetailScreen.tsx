@@ -397,6 +397,7 @@ export const ChallengeDetailScreen = ({
           unitLabel={challenge.submission.unitLabel}
           navigation={navigation}
           onDaySelected={handleDaySelected}
+          challengeCreatedAt={challenge.createdAt}
         />
       </ScrollView>
     </SafeAreaView>
