@@ -3,6 +3,15 @@
  */
 
 import { dateKeys } from './dateKeys';
+import {
+  resolveAdminTimeZone,
+  getCurrentPeriodDayKey,
+  getCurrentPeriodWeekKey,
+  computeDueMomentUtcForDay,
+  computeWeeklyDueMomentUtc,
+  getAdminZoneWeekKey,
+  formatDueMomentInViewerZone,
+} from './dueTime';
 
 type ChallengeType = "standard" | "progress" | "elimination" | "deadline";
 type CadenceUnit = "daily" | "weekly";
@@ -18,7 +27,11 @@ type Challenge = {
   due: {
     dueTimeLocal?: string;
     deadlineDate?: string;
+    timezone?: string;
+    timezoneOffset?: number;
   };
+  adminTimeZone?: string;
+  state?: string;
   rules?: {
     progress?: {
       startsAt: number;
@@ -92,14 +105,18 @@ export const challengeEval = {
       };
     }
 
-    // Get current period key
-    const currentDayKey = dateKeys.getDayKey();
-    const currentWeekKey = dateKeys.getWeekKey(new Date(), challenge.cadence.weekStartsOn);
-    const currentPeriodKey = challenge.cadence.unit === 'daily' ? currentDayKey : currentWeekKey;
+    // Determine the current period key using IANA timezone (with fallback)
+    const adminTz = resolveAdminTimeZone(challenge);
+    const dueTimeLocal = challenge.due?.dueTimeLocal || '23:59';
+    let currentPeriodKey: string;
+    if (challenge.cadence.unit === 'daily') {
+      currentPeriodKey = getCurrentPeriodDayKey(adminTz, dueTimeLocal);
+    } else {
+      currentPeriodKey = getCurrentPeriodWeekKey(adminTz, challenge.cadence.weekStartsOn ?? 1);
+    }
     
-    // Use selected period if provided (for historical view), otherwise use current
     const periodKey = selectedPeriodKey || currentPeriodKey;
-    const isCurrentPeriod = periodKey === currentPeriodKey;
+    const isCurrentPeriod = !selectedPeriodKey || periodKey === currentPeriodKey;
 
     // Get user's check-ins for this period
     const myCheckIns = checkInsForCurrentPeriod.filter(ci => ci.userId === userId);
@@ -161,37 +178,37 @@ export const challengeEval = {
       };
     }
 
-    // For current period: Check if due has passed
-    const duePassed = this.isDuePassed(challenge, periodKey);
-
-    if (duePassed) {
-      const dueTime = challenge.due.dueTimeLocal || '23:59';
-      return {
-        type: 'missed',
-        missedAt: dateKeys.format12Hour(dueTime),
-      };
+    // At this point, we're in the CURRENT period and not completed yet.
+    // Compute time remaining using the canonical UTC due moment.
+    const now = new Date();
+    let dueMomentUtc: Date;
+    if (challenge.cadence.unit === 'weekly') {
+      dueMomentUtc = computeWeeklyDueMomentUtc(
+        adminTz,
+        currentPeriodKey,
+        dueTimeLocal,
+        challenge.cadence.weekStartsOn ?? 1
+      );
+    } else {
+      dueMomentUtc = computeDueMomentUtcForDay(adminTz, currentPeriodKey, dueTimeLocal);
     }
 
-    // Still pending
-    const timeRemaining = dateKeys.getTimeRemaining(challenge.due.dueTimeLocal);
+    const diffMs = dueMomentUtc.getTime() - now.getTime();
+    let timeRemaining: string;
+    if (diffMs <= 0) {
+      timeRemaining = '0m';
+    } else {
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      timeRemaining = diffHours > 0 ? `${diffHours}h ${diffMinutes}m` : `${diffMinutes}m`;
+    }
+
     return {
       type: 'pending',
       timeRemaining,
     };
   },
 
-  /**
-   * Check if due has passed for current period
-   */
-  isDuePassed(challenge: Challenge, currentPeriodKey: string): boolean {
-    if (challenge.cadence.unit === 'daily') {
-      return dateKeys.isDueTimePassed(challenge.due.dueTimeLocal);
-    } else {
-      // Weekly: due passed if we're in a different week
-      const currentWeekKey = dateKeys.getWeekKey(new Date(), challenge.cadence.weekStartsOn);
-      return currentWeekKey !== currentPeriodKey;
-    }
-  },
 
   /**
    * Compute target for progress challenges

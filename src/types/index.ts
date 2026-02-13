@@ -81,8 +81,10 @@ export interface Challenge {
   };
 
   due: {
-    dueTimeLocal?: string;           // "23:59", "06:00"
+    dueTimeLocal?: string;           // "23:59", "06:00" — wall-clock time in adminTimeZone
     timezoneMode: 'userLocal' | 'groupLocal';
+    timezone?: string;               // IANA timezone (e.g., "America/New_York") — legacy alias for adminTimeZone
+    timezoneOffset?: number;         // Offset in minutes from UTC when challenge created (legacy)
     deadlineDate?: string;           // YYYY-MM-DD (for deadline type)
   };
 
@@ -110,6 +112,18 @@ export interface Challenge {
     allowLateCheckIn?: boolean;
     lateGraceMinutes?: number;
   };
+
+  // Admin / ownership
+  adminUserId?: string;              // Challenge admin (creator). Falls back to createdBy.
+  adminTimeZone?: string;            // IANA timezone of the admin at creation (e.g., "America/Los_Angeles")
+
+  // Challenge lifecycle state
+  state?: 'active' | 'ended';       // Default 'active'. Set to 'ended' when deadline/winner.
+  endedAt?: Date;                    // When the challenge ended
+  winnerId?: string;                 // userId of the winner (elimination challenges)
+
+  // Scheduler hint: next due moment as UTC millis for efficient querying
+  nextDueAtUtc?: number;
 
   createdBy: string;
   createdAt: Date;

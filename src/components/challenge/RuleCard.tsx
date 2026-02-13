@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { challengeEval } from '../../utils/challengeEval';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 type ChallengeType = "standard" | "progress" | "elimination" | "deadline";
 type InputType = "boolean" | "number" | "text" | "timer";
@@ -43,6 +44,7 @@ export const RuleCard: React.FC<RuleCardProps> = ({
   submission,
   challenge,
 }) => {
+  const { colors } = useColorMode();
   const progressTarget = type === 'progress' && challenge 
     ? challengeEval.computeProgressTarget(challenge) 
     : null;
@@ -50,13 +52,13 @@ export const RuleCard: React.FC<RuleCardProps> = ({
   if (!description && !progressTarget) return null;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.surface, borderColor: colors.dividerLineTodo + '99' }]}>
       {description && (
-        <Text style={styles.description}>{description}</Text>
+        <Text style={[styles.description, { color: colors.textSecondary }]}>{description}</Text>
       )}
 
       {type === 'progress' && progressTarget !== null && (
-        <Text style={styles.target}>
+        <Text style={[styles.target, { color: colors.accent }]}>
           Target: {progressTarget} {submission.unitLabel || 'units'}
         </Text>
       )}
@@ -66,25 +68,19 @@ export const RuleCard: React.FC<RuleCardProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#FFF',
     borderRadius: 12,
     padding: 14,
     marginHorizontal: 16,
     marginTop: 12,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
   },
-
   description: {
     fontSize: 14,
-    color: '#666',
     lineHeight: 20,
     marginBottom: 8,
   },
-
   target: {
     fontSize: 14,
-    color: '#FF6B35',
     fontWeight: '600',
   },
 });

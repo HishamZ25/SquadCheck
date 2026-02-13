@@ -18,6 +18,7 @@ export const GroupTypeScreen: React.FC = ({ route }: any) => {
   const navigation = useNavigation();
   const [selectedType, setSelectedType] = useState<GroupType | null>(null);
   const isSolo = route?.params?.isSolo || false;
+  const groupId = route?.params?.groupId;
 
   const handleTypeSelect = (type: GroupType) => {
     setSelectedType(type);
@@ -32,7 +33,8 @@ export const GroupTypeScreen: React.FC = ({ route }: any) => {
     // Navigate to CreateChallengeScreen
     (navigation as any).navigate('CreateChallenge', { 
       challengeType: selectedType,
-      isSolo: isSolo 
+      isSolo: isSolo,
+      groupId: groupId
     });
   };
 
@@ -121,15 +123,10 @@ export const GroupTypeScreen: React.FC = ({ route }: any) => {
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={22} color="#000000" />
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={22} color="#000" />
           </TouchableOpacity>
-          <Text style={styles.mainTitle}>
-            Choose Challenge Type
-          </Text>
+          <Text style={styles.mainTitle}>Choose Challenge Type</Text>
           <View style={styles.placeholder} />
         </View>
         
@@ -167,28 +164,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Theme.layout.screenPadding,
-    paddingVertical: Theme.spacing.lg,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+    backgroundColor: '#F1F0ED',
   },
-  
   backButton: {
-    padding: Theme.spacing.sm,
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    padding: 8,
   },
-  
   placeholder: {
     width: 48,
   },
-  
   content: {
     flex: 1,
     padding: Theme.spacing.md,
   },
-  
   mainTitle: {
-    ...Theme.typography.h2,
-    color: '#FF6B35',
-    textAlign: 'center',
+    fontSize: 28,
     fontWeight: '700',
+    color: '#000',
+    textAlign: 'center',
     flex: 1,
   },
   

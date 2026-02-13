@@ -100,16 +100,17 @@ export const StoreScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView 
-        style={styles.content} 
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Store</Text>
+      </View>
+      <ScrollView
+        style={styles.content}
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.mainTitle}>Store</Text>
         <Text style={styles.mainSubtitle}>
           Browse and unlock new items for your profile
         </Text>
-
         {renderCategoryOptions()}
       </ScrollView>
     </SafeAreaView>
@@ -123,26 +124,31 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+    backgroundColor: '#F1F0ED',
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#000',
+  },
   content: {
     flex: 1,
     padding: Theme.spacing.md,
   },
-  
   contentContainer: {
-    paddingBottom: 90, // Account for tab bar
+    paddingBottom: 80,
     flexGrow: 1,
   },
-  
-  mainTitle: {
-    ...Theme.typography.h2,
-    color: '#000000',
-    textAlign: 'center',
-    marginBottom: Theme.spacing.xs,
-  },
-  
   mainSubtitle: {
     ...Theme.typography.body,
-    color: '#000000',
+    color: '#666666',
     textAlign: 'center',
     marginBottom: Theme.spacing.xl,
   },

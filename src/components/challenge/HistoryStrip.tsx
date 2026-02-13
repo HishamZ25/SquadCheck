@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { dateKeys } from '../../utils/dateKeys';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 type CadenceUnit = "daily" | "weekly";
 
@@ -32,6 +33,8 @@ interface HistoryStripProps {
   navigation?: any;
   onDaySelected?: (dayKey: string) => void;
   challengeCreatedAt: Date | number;
+  selectedDayKey?: string | null;
+  dueTimeLocal?: string; // Due time to calculate current check-in period
 }
 
 export const HistoryStrip: React.FC<HistoryStripProps> = ({
@@ -43,21 +46,27 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
   navigation,
   onDaySelected,
   challengeCreatedAt,
+  selectedDayKey,
+  dueTimeLocal = '23:59',
 }) => {
+  const { colors } = useColorMode();
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
 
   const getPeriodKeys = () => {
     if (cadenceUnit === 'daily') {
-      // Get 7 days starting from Sunday of the current week (with offset)
+      // Use TODAY (not check-in period) for display
       const today = new Date();
-      today.setDate(today.getDate() + (weekOffset * 7));
+      const currentDate = new Date(today);
+      
+      // Apply week offset from today
+      currentDate.setDate(currentDate.getDate() + (weekOffset * 7));
       
       // Find the Sunday of this week
-      const dayOfWeek = today.getDay();
-      const sunday = new Date(today);
-      sunday.setDate(today.getDate() - dayOfWeek);
+      const dayOfWeek = currentDate.getDay();
+      const sunday = new Date(currentDate);
+      sunday.setDate(currentDate.getDate() - dayOfWeek);
       
       // Generate 7 days from Sunday to Saturday
       const days = [];
@@ -98,15 +107,24 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
       : challengeCreatedAt;
     creationDate.setHours(0, 0, 0, 0);
     
+    // Today at end of day
     const today = new Date();
     today.setHours(23, 59, 59, 999);
     
+    // Today at start of day (for comparison)
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    
     if (cadenceUnit === 'daily') {
-      const periodDate = new Date(periodKey);
-      return periodDate >= creationDate && periodDate <= today;
+      const periodDate = new Date(periodKey + 'T12:00:00');
+      periodDate.setHours(0, 0, 0, 0);
+      
+      // Must be >= creation date AND <= today (not future)
+      return periodDate >= creationDate && periodDate <= todayStart;
     } else {
       const weekStart = dateKeys.parseKey(periodKey);
-      return weekStart >= creationDate && weekStart <= today;
+      weekStart.setHours(0, 0, 0, 0);
+      return weekStart >= creationDate && weekStart <= todayStart;
     }
   };
 
@@ -183,26 +201,26 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
 
   return (
     <>
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.surface, borderColor: colors.dividerLineTodo + '99' }]}>
         <View style={styles.header}>
-          <Text style={styles.title}>History</Text>
+          <Text style={[styles.title, { color: colors.text }]}>History</Text>
           
           {cadenceUnit === 'daily' && (
             <View style={styles.navigationRow}>
               <TouchableOpacity 
-                style={[styles.navButton, !canGoBack() && styles.navButtonDisabled]}
+                style={[styles.navButton, { backgroundColor: colors.card }, !canGoBack() && [styles.navButtonDisabled, { backgroundColor: colors.background }]]}
                 onPress={() => canGoBack() && setWeekOffset(weekOffset - 1)}
                 disabled={!canGoBack()}
               >
-                <Ionicons name="chevron-back" size={20} color={canGoBack() ? '#666' : '#CCC'} />
+                <Ionicons name="chevron-back" size={20} color={canGoBack() ? colors.textSecondary : colors.dividerLineTodo + '80'} />
               </TouchableOpacity>
               
               <TouchableOpacity 
-                style={[styles.navButton, !canGoForward() && styles.navButtonDisabled]}
+                style={[styles.navButton, { backgroundColor: colors.card }, !canGoForward() && [styles.navButtonDisabled, { backgroundColor: colors.background }]]}
                 onPress={() => canGoForward() && setWeekOffset(weekOffset + 1)}
                 disabled={!canGoForward()}
               >
-                <Ionicons name="chevron-forward" size={20} color={canGoForward() ? '#666' : '#CCC'} />
+                <Ionicons name="chevron-forward" size={20} color={canGoForward() ? colors.textSecondary : colors.dividerLineTodo + '80'} />
               </TouchableOpacity>
             </View>
           )}
@@ -215,9 +233,10 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
             const checkIns = getCheckInsForPeriod(periodKey);
 
             if (cadenceUnit === 'daily') {
-              const { dayName, dayNumber } = formatDayLabel(periodKey);
+              const { dayName, dayNumber} = formatDayLabel(periodKey);
               const today = dateKeys.getDayKey(new Date());
               const isToday = periodKey === today;
+              const isSelected = periodKey === selectedDayKey;
 
               return (
                 <TouchableOpacity
@@ -227,13 +246,14 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
                   activeOpacity={status === 'invalid' ? 1 : 0.7}
                   disabled={status === 'invalid'}
                 >
-                  <Text style={[styles.dayName, isToday && styles.todayDayName]}>
+                  <Text style={[styles.dayName, { color: colors.textSecondary }, isToday && [styles.todayDayName, { color: colors.accent }]]}>
                     {dayName}
                   </Text>
                   <View style={[
                     styles.dayCircle,
                     { backgroundColor: statusConfig.backgroundColor },
-                    isToday && styles.todayCircle,
+                    isToday && [styles.todayCircle, { borderColor: colors.accent }],
+                    isSelected && [styles.selectedDayCircle, { borderColor: colors.accent }],
                   ]}>
                     {statusConfig.icon ? (
                       <Ionicons name={statusConfig.icon} size={14} color={statusConfig.textColor} />
@@ -263,9 +283,9 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
                       <Text style={[styles.weekLabel, { color: statusConfig.textColor }]}>W</Text>
                     )}
                   </View>
-                  <Text style={styles.weekText} numberOfLines={1}>{label}</Text>
+                  <Text style={[styles.weekText, { color: colors.textSecondary }]} numberOfLines={1}>{label}</Text>
                   {status === 'partial' && (
-                    <Text style={styles.weekCount}>
+                    <Text style={[styles.weekCount, { color: colors.accent }]}>
                       {checkIns.filter(ci => ci.status === 'completed').length}/{requiredCount}
                     </Text>
                   )}
@@ -288,28 +308,32 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
           activeOpacity={1}
           onPress={() => setModalVisible(false)}
         >
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             {selectedPeriod && (
               <>
                 <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>
+                  <Text style={[styles.modalTitle, { color: colors.text }]}>
                     {formatPeriodLabel(selectedPeriod)}
                   </Text>
                   <TouchableOpacity onPress={() => setModalVisible(false)}>
-                    <Ionicons name="close" size={24} color="#666" />
+                    <Ionicons name="close" size={24} color={colors.textSecondary} />
                   </TouchableOpacity>
                 </View>
 
                 {getCheckInsForPeriod(selectedPeriod).length > 0 ? (
                   <ScrollView style={styles.checkInsList}>
                     {getCheckInsForPeriod(selectedPeriod).map(checkIn => (
-                      <View key={checkIn.id} style={styles.checkInItem}>
+                      <View key={checkIn.id} style={[styles.checkInItem, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '80' }]}>
                         <View style={styles.checkInHeader}>
-                          <Text style={styles.checkInTime}>
-                            {new Date(checkIn.createdAt).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
+                          <Text style={[styles.checkInTime, { color: colors.textSecondary }]}>
+                            {(() => {
+                              const raw = checkIn.createdAt as Date | number | { toDate?: () => Date; toMillis?: () => number };
+                              const date = !raw ? new Date(0) : raw instanceof Date ? raw
+                                : typeof raw === 'number' ? new Date(raw)
+                                : typeof (raw as any)?.toDate === 'function' ? (raw as any).toDate()
+                                : (raw as any)?.toMillis ? new Date((raw as any).toMillis()) : new Date(raw as any);
+                              return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            })()}
                           </Text>
                           <View
                             style={[
@@ -343,17 +367,17 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
                         </View>
 
                         {checkIn.payload.numberValue !== undefined && (
-                          <Text style={styles.checkInPayload}>
+                          <Text style={[styles.checkInPayload, { color: colors.text }]}>
                             Value: {checkIn.payload.numberValue} {unitLabel || ''}
                           </Text>
                         )}
                         {checkIn.payload.timerSeconds !== undefined && (
-                          <Text style={styles.checkInPayload}>
+                          <Text style={[styles.checkInPayload, { color: colors.text }]}>
                             Time: {Math.floor(checkIn.payload.timerSeconds / 60)} minutes
                           </Text>
                         )}
                         {checkIn.payload.textValue && (
-                          <Text style={styles.checkInPayload} numberOfLines={3}>
+                          <Text style={[styles.checkInPayload, { color: colors.text }]} numberOfLines={3}>
                             "{checkIn.payload.textValue}"
                           </Text>
                         )}
@@ -371,8 +395,8 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
                   </ScrollView>
                 ) : (
                   <View style={styles.emptyState}>
-                    <Ionicons name="calendar-outline" size={48} color="#E0E0E0" />
-                    <Text style={styles.emptyText}>No check-ins for this period</Text>
+                    <Ionicons name="calendar-outline" size={48} color={colors.textSecondary} />
+                    <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No check-ins for this period</Text>
                   </View>
                 )}
               </>
@@ -460,6 +484,11 @@ const styles = StyleSheet.create({
 
   todayCircle: {
     borderWidth: 2,
+    borderColor: '#FF6B35',
+  },
+  
+  selectedDayCircle: {
+    borderWidth: 3,
     borderColor: '#FF6B35',
   },
 

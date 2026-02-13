@@ -1,30 +1,80 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
+  TouchableOpacity,
+  PanResponder,
 } from 'react-native';
-import { Theme } from '../../constants/theme';
-import { Ionicons } from '@expo/vector-icons';
+import { GroupsScreen } from './GroupsScreen';
+import { FriendsScreen } from './FriendsScreen';
+import { useColorMode } from '../../theme/ColorModeContext';
+
+const SWIPE_THRESHOLD = 50;
 
 interface SocialScreenProps {
   navigation: any;
 }
 
 export const SocialScreen: React.FC<SocialScreenProps> = ({ navigation }) => {
+  const { colors } = useColorMode();
+  const [activeTab, setActiveTab] = useState<'groups' | 'friends'>('groups');
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          const { dx, dy } = gestureState;
+          return Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10;
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          const { dx } = gestureState;
+          if (dx > SWIPE_THRESHOLD && activeTab === 'friends') {
+            setActiveTab('groups');
+          } else if (dx < -SWIPE_THRESHOLD && activeTab === 'groups') {
+            setActiveTab('friends');
+          }
+        },
+      }),
+    [activeTab]
+  );
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <View style={styles.header}>
-          <Ionicons name="chatbubbles" size={48} color={Theme.colors.secondary} />
-          <Text style={styles.title}>Social</Text>
-          <Text style={styles.subtitle}>Connect with your accountability partners</Text>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.header, { backgroundColor: colors.background }]}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Social</Text>
+      </View>
+
+      <View style={[styles.tabContainer, { backgroundColor: colors.dividerLineTodo + '30' }]}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'groups' && [styles.tabActive, { backgroundColor: colors.accent }]]}
+          onPress={() => setActiveTab('groups')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'groups' && { color: '#FFF' }]}>
+            Groups
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'friends' && [styles.tabActive, { backgroundColor: colors.accent }]]}
+          onPress={() => setActiveTab('friends')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'friends' && { color: '#FFF' }]}>
+            Friends
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Content - Swipeable, keep both mounted to avoid refetching */}
+      <View style={styles.content} {...panResponder.panHandlers}>
+        <View style={[styles.tabContent, activeTab !== 'groups' && styles.hidden]}>
+          <GroupsScreen navigation={navigation} />
         </View>
-        
-        <View style={styles.placeholder}>
-          <Ionicons name="checkmark-circle-outline" size={48} color={Theme.colors.textSecondary} />
-          <Text style={styles.placeholderText}>Coming soon...</Text>
+        <View style={[styles.tabContent, activeTab !== 'friends' && styles.hidden]}>
+          <FriendsScreen navigation={navigation} />
         </View>
       </View>
     </SafeAreaView>
@@ -34,47 +84,47 @@ export const SocialScreen: React.FC<SocialScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F1F0ED',
-    position: 'relative',
   },
-  
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    marginHorizontal: 20,
+    marginBottom: 16,
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabActive: {},
+  tabText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  tabTextActive: {},
   content: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: Theme.layout.screenPadding,
-    paddingBottom: 90, // Account for tab bar
   },
-  
-  header: {
-    alignItems: 'center',
-    marginBottom: Theme.spacing.xxl,
+  tabContent: {
+    flex: 1,
   },
-  
-  title: {
-    ...Theme.typography.h2,
-    marginTop: Theme.spacing.md,
-    marginBottom: Theme.spacing.sm,
-    textAlign: 'center',
-    color: '#000000',
-  },
-  
-  subtitle: {
-    ...Theme.typography.bodySmall,
-    textAlign: 'center',
-    color: '#666666',
-  },
-  
-  placeholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Theme.spacing.xl * 2,
-  },
-  
-  placeholderText: {
-    ...Theme.typography.body,
-    color: '#666666',
-    marginTop: Theme.spacing.md,
-    textAlign: 'center',
+  hidden: {
+    display: 'none',
   },
 });

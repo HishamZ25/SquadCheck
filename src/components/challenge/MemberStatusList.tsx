@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from '../common/Avatar';
 import { challengeEval } from '../../utils/challengeEval';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 type ChallengeType = "standard" | "progress" | "elimination" | "deadline";
 type CadenceUnit = "daily" | "weekly";
@@ -19,6 +20,8 @@ interface MemberStatusListProps {
   checkInsForCurrentPeriod: CheckIn[];
   challengeMembers: ChallengeMember[];
   selectedPeriodKey?: string;
+  /** Optional max height for the list (e.g. for single-screen layouts) */
+  listMaxHeight?: number;
 }
 
 export const MemberStatusList: React.FC<MemberStatusListProps> = ({
@@ -29,7 +32,9 @@ export const MemberStatusList: React.FC<MemberStatusListProps> = ({
   checkInsForCurrentPeriod,
   challengeMembers,
   selectedPeriodKey,
+  listMaxHeight,
 }) => {
+  const { colors } = useColorMode();
   const getMemberStatus = (userId: string): 'completed' | 'pending' | 'missed' | 'eliminated' => {
     return challengeEval.getMemberStatus(
       challenge,
@@ -43,13 +48,13 @@ export const MemberStatusList: React.FC<MemberStatusListProps> = ({
   const getStatusIcon = (status: 'completed' | 'pending' | 'missed' | 'eliminated') => {
     switch (status) {
       case 'completed':
-        return { icon: 'checkmark-circle' as const, color: '#4CAF50', label: 'Done', isFilled: true };
+        return { icon: 'checkmark-circle' as const, color: '#22C55E', label: 'Done', isFilled: true };
       case 'pending':
         return { icon: 'ellipse-outline' as const, color: '#999', label: 'Pending', isFilled: false };
       case 'missed':
-        return { icon: 'close-circle' as const, color: '#F44336', label: 'Missed', isFilled: true };
+        return { icon: 'ellipse-outline' as const, color: '#6B7280', label: 'Missed', isFilled: false };
       case 'eliminated':
-        return { icon: 'skull-outline' as const, color: '#666', label: 'Out', isFilled: false };
+        return { icon: 'skull-outline' as const, color: '#6B7280', label: 'Out', isFilled: false };
     }
   };
 
@@ -79,7 +84,7 @@ export const MemberStatusList: React.FC<MemberStatusListProps> = ({
     <View style={styles.container}>
       <Text style={styles.title}>Group Status</Text>
 
-      <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
+      <ScrollView style={[styles.list, listMaxHeight != null && { maxHeight: listMaxHeight }]} showsVerticalScrollIndicator={false}>
         {sortedMembers.map(userId => {
           const profile = memberProfiles[userId] || { name: `User ${userId.slice(0, 4)}` };
           const status = getMemberStatus(userId);
@@ -106,11 +111,11 @@ export const MemberStatusList: React.FC<MemberStatusListProps> = ({
 
               {/* Name */}
               <View style={styles.memberInfo}>
-                <Text style={[styles.memberName, isCurrentUser && styles.currentUserName]}>
+                <Text style={[styles.memberName, { color: colors.text }, isCurrentUser && { fontWeight: '700', color: colors.text }]}>
                   {isCurrentUser ? 'You' : profile.name}
                 </Text>
                 {weeklyProgress && (
-                  <Text style={styles.weeklyProgress}>{weeklyProgress}</Text>
+                  <Text style={[styles.weeklyProgress, { color: colors.textSecondary }]}>{weeklyProgress}</Text>
                 )}
               </View>
 
@@ -135,38 +140,29 @@ export const MemberStatusList: React.FC<MemberStatusListProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#FFF',
     borderRadius: 12,
     padding: 14,
     marginHorizontal: 16,
     marginTop: 12,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
   },
-
   title: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#000',
     marginBottom: 12,
   },
-
   list: {
     maxHeight: 250,
   },
-
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
   },
-
   currentUserRow: {
     backgroundColor: 'transparent',
   },
-
   avatarContainer: {
     width: 36,
     height: 36,
@@ -175,25 +171,16 @@ const styles = StyleSheet.create({
     marginRight: 10,
     overflow: 'hidden',
   },
-
   memberInfo: {
     flex: 1,
   },
-
   memberName: {
     fontSize: 14,
-    color: '#333',
     fontWeight: '500',
   },
-
-  currentUserName: {
-    fontWeight: '700',
-    color: '#000',
-  },
-
+  currentUserName: {},
   weeklyProgress: {
     fontSize: 11,
-    color: '#999',
     marginTop: 1,
   },
 

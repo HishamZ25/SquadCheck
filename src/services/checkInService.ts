@@ -1,23 +1,29 @@
-import { 
-  collection, 
-  doc, 
-  addDoc, 
-  updateDoc, 
-  getDoc, 
-  getDocs, 
-  query, 
-  where, 
+import {
+  collection,
+  doc,
+  addDoc,
+  updateDoc,
+  getDoc,
+  getDocs,
+  query,
+  where,
   orderBy,
   onSnapshot,
-  Timestamp 
+  Timestamp
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from './firebase';
-import { CheckIn, AIVerdict, Dispute } from '../types';
+import { CheckIn } from '../types';
+import {
+  resolveAdminTimeZone,
+  getCurrentPeriodDayKey,
+  getCurrentPeriodWeekKey,
+  canUserCheckIn,
+} from '../utils/dueTime';
 
 export class CheckInService {
-  // Create a new check-in
-  static async createCheckIn(
+  // LEGACY: Create a new check-in (old schema - deprecated)
+  /* static async createCheckIn(
     userId: string,
     groupId: string,
     goalId: string,
@@ -31,7 +37,7 @@ export class CheckInService {
       const imageURL = await getDownloadURL(snapshot.ref);
 
       // Create check-in document
-      const checkInData: Omit<CheckIn, 'id'> = {
+      const checkInData: any = {
         userId,
         groupId,
         goalId,
@@ -48,7 +54,7 @@ export class CheckInService {
       console.error('Error creating check-in:', error);
       throw error;
     }
-  }
+  } */
 
   // Get check-in by ID
   static async getCheckIn(checkInId: string): Promise<CheckIn | null> {
@@ -68,15 +74,80 @@ export class CheckInService {
   static async getGroupCheckIns(groupId: string): Promise<CheckIn[]> {
     try {
       const checkInsQuery = query(
-        collection(db, 'check-ins'),
-        where('groupId', '==', groupId),
-        orderBy('timestamp', 'desc')
+        collection(db, 'checkIns'),
+        where('groupId', '==', groupId)
       );
 
       const querySnapshot = await getDocs(checkInsQuery);
-      return querySnapshot.docs.map(doc => doc.data() as CheckIn);
+      
+      const checkIns = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          ...data,
+          id: doc.id,
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt),
+        } as CheckIn;
+      });
+      
+      // Sort in memory
+      checkIns.sort((a, b) => {
+        const aTime = a.createdAt?.getTime ? a.createdAt.getTime() : 0;
+        const bTime = b.createdAt?.getTime ? b.createdAt.getTime() : 0;
+        return bTime - aTime;
+      });
+      
+      return checkIns;
     } catch (error) {
       console.error('Error getting group check-ins:', error);
+      return [];
+    }
+  }
+
+  // Get check-ins for specific challenges
+  static async getChallengeCheckIns(challengeIds: string[]): Promise<CheckIn[]> {
+    try {
+      if (!challengeIds || challengeIds.length === 0) {
+        return [];
+      }
+      
+      // Firestore 'in' queries are limited to 10 items, so we need to batch
+      const batchSize = 10;
+      const batches: Promise<CheckIn[]>[] = [];
+      
+      for (let i = 0; i < challengeIds.length; i += batchSize) {
+        const batch = challengeIds.slice(i, i + batchSize);
+        const checkInsQuery = query(
+          collection(db, 'checkIns'),
+          where('challengeId', 'in', batch)
+        );
+        
+        const batchPromise = getDocs(checkInsQuery).then(querySnapshot => {
+          return querySnapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+              ...data,
+              id: doc.id,
+              createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt),
+            } as CheckIn;
+          });
+        });
+        
+        batches.push(batchPromise);
+      }
+      
+      const results = await Promise.all(batches);
+      const checkIns = results.flat();
+      
+      // Sort by createdAt descending
+      checkIns.sort((a, b) => {
+        const aTime = a.createdAt?.getTime ? a.createdAt.getTime() : 0;
+        const bTime = b.createdAt?.getTime ? b.createdAt.getTime() : 0;
+        return bTime - aTime;
+      });
+      
+      return checkIns;
+    } catch (error) {
+      console.error('Error getting challenge check-ins:', error);
       return [];
     }
   }
@@ -128,95 +199,14 @@ export class CheckInService {
     }
   }
 
-  // Add AI verdict
-  static async addAIVerdict(checkInId: string, aiVerdict: AIVerdict): Promise<void> {
-    try {
-      const checkInRef = doc(db, 'check-ins', checkInId);
-      await updateDoc(checkInRef, {
-        aiVerdict,
-        status: 'ai-verified',
-      });
-    } catch (error) {
-      console.error('Error adding AI verdict:', error);
-      throw error;
-    }
-  }
-
-  // Add dispute to check-in
-  static async addDispute(checkInId: string, dispute: Omit<Dispute, 'id'>): Promise<void> {
-    try {
-      const checkInRef = doc(db, 'check-ins', checkInId);
-      const checkInDoc = await getDoc(checkInRef);
-      
-      if (!checkInDoc.exists()) {
-        throw new Error('Check-in not found');
-      }
-
-      const checkIn = checkInDoc.data() as CheckIn;
-      const newDispute: Dispute = {
-        ...dispute,
-        id: Date.now().toString(), // Simple ID generation
-      };
-
-      const updatedDisputes = [...checkIn.disputes, newDispute];
-      await updateDoc(checkInRef, { disputes: updatedDisputes });
-    } catch (error) {
-      console.error('Error adding dispute:', error);
-      throw error;
-    }
-  }
-
-  // Resolve dispute
-  static async resolveDispute(checkInId: string, disputeId: string): Promise<void> {
-    try {
-      const checkInRef = doc(db, 'check-ins', checkInId);
-      const checkInDoc = await getDoc(checkInRef);
-      
-      if (!checkInDoc.exists()) {
-        throw new Error('Check-in not found');
-      }
-
-      const checkIn = checkInDoc.data() as CheckIn;
-      const updatedDisputes = checkIn.disputes.map(dispute => 
-        dispute.id === disputeId 
-          ? { ...dispute, isResolved: true }
-          : dispute
-      );
-
-      await updateDoc(checkInRef, { disputes: updatedDisputes });
-    } catch (error) {
-      console.error('Error resolving dispute:', error);
-      throw error;
-    }
-  }
-
-  // Listen to group check-ins in real-time
-  static subscribeToGroupCheckIns(groupId: string, callback: (checkIns: CheckIn[]) => void) {
-    const checkInsQuery = query(
-      collection(db, 'check-ins'),
-      where('groupId', '==', groupId),
-      orderBy('timestamp', 'desc')
-    );
-
-    return onSnapshot(checkInsQuery, (querySnapshot) => {
-      const checkIns = querySnapshot.docs.map(doc => doc.data() as CheckIn);
-      callback(checkIns);
-    });
-  }
-
-  // Listen to user check-ins in real-time
-  static subscribeToUserCheckIns(userId: string, callback: (checkIns: CheckIn[]) => void) {
-    const checkInsQuery = query(
-      collection(db, 'check-ins'),
-      where('userId', '==', userId),
-      orderBy('timestamp', 'desc')
-    );
-
-    return onSnapshot(checkInsQuery, (querySnapshot) => {
-      const checkIns = querySnapshot.docs.map(doc => doc.data() as CheckIn);
-      callback(checkIns);
-    });
-  }
+  // LEGACY METHODS - Commented out (old schema)
+  /* 
+  static async addAIVerdict(checkInId: string, aiVerdict: any): Promise<void> { ... }
+  static async addDispute(checkInId: string, dispute: any): Promise<void> { ... }
+  static async resolveDispute(checkInId: string, disputeId: string): Promise<void> { ... }
+  static subscribeToGroupCheckIns(groupId: string, callback: any) { ... }
+  static subscribeToUserCheckIns(userId: string, callback: any) { ... }
+  */
 
   // NEW SCHEMA: Submit challenge check-in
   static async submitChallengeCheckIn(
@@ -230,26 +220,55 @@ export class CheckInService {
       textValue?: string;
       timerSeconds?: number;
     },
-    attachments?: Array<{ type: 'photo' | 'screenshot'; uri: string }>
+    attachments?: Array<{ type: 'photo' | 'screenshot'; uri: string }>,
+    challengeDueTime?: string,
+    challengeTimezoneOffset?: number
   ): Promise<string> {
     try {
-      const now = new Date();
-      const dayKey = now.toISOString().split('T')[0]; // YYYY-MM-DD
-      
-      // Calculate week key (ISO week format: YYYY-Wnn)
-      const startOfYear = new Date(now.getFullYear(), 0, 1);
-      const daysSinceStartOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24));
-      const weekNumber = Math.ceil((daysSinceStartOfYear + startOfYear.getDay() + 1) / 7);
-      const weekKey = `${now.getFullYear()}-W${String(weekNumber).padStart(2, '0')}`;
+      // Fetch challenge data for validation
+      const challengeRef = doc(db, 'challenges', challengeId);
+      const challengeSnap = await getDoc(challengeRef);
+      if (!challengeSnap.exists()) {
+        throw new Error('Challenge not found.');
+      }
+      const challengeData = challengeSnap.data() as Record<string, any>;
 
-      const period: any = {
-        unit: cadenceUnit,
-      };
-      
+      // Check if challenge has ended
+      if (challengeData.state === 'ended') {
+        throw new Error('This challenge has ended. Check-ins are no longer accepted.');
+      }
+
+      // Check elimination status
+      const memberId = `${challengeId}_${userId}`;
+      const memberSnap = await getDoc(doc(db, 'challengeMembers', memberId));
+      const memberData = memberSnap.data() as { state?: string } | undefined;
+      if (challengeData.type === 'elimination' && memberData?.state === 'eliminated') {
+        throw new Error('You have been eliminated from this challenge and can no longer submit.');
+      }
+
+      // Check deadline
+      if (challengeData.type === 'deadline' && challengeData.due?.deadlineDate) {
+        const checkResult = canUserCheckIn(
+          challengeData as any,
+          (memberData?.state as any) || 'active'
+        );
+        if (!checkResult.allowed) {
+          throw new Error(checkResult.reason || 'Cannot check in.');
+        }
+      }
+
+      // Compute period keys using IANA timezone
+      const adminTz = resolveAdminTimeZone(challengeData as any);
+      const dueTimeLocal = challengeData.due?.dueTimeLocal || challengeDueTime || '23:59';
+      const weekStartsOn = challengeData.cadence?.weekStartsOn ?? 1;
+      const now = new Date();
+
+      const period: any = { unit: cadenceUnit };
+
       if (cadenceUnit === 'daily') {
-        period.dayKey = dayKey;
+        period.dayKey = getCurrentPeriodDayKey(adminTz, dueTimeLocal, now);
       } else {
-        period.weekKey = weekKey;
+        period.weekKey = getCurrentPeriodWeekKey(adminTz, weekStartsOn, now);
       }
 
       const checkInData: any = {
@@ -266,8 +285,11 @@ export class CheckInService {
       const docRef = await addDoc(collection(db, 'checkIns'), checkInData);
       return docRef.id;
     } catch (error) {
-      console.error('Error submitting challenge check-in:', error);
-      throw error;
+      if (__DEV__) {
+        console.error('Error submitting challenge check-in:', error);
+      }
+      if (error instanceof Error) throw error;
+      throw new Error('Failed to submit check-in');
     }
   }
 } 

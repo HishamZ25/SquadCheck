@@ -17,7 +17,9 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Theme } from '../../constants/theme';
 import { Button } from '../../components/common/Button';
+import { Input } from '../../components/common/Input';
 import { Avatar } from '../../components/common/Avatar';
+import { CircleLoader } from '../../components/common/CircleLoader';
 import { GroupService } from '../../services/groupService';
 import { FriendshipService } from '../../services/friendshipService';
 import { auth } from '../../services/firebase';
@@ -325,11 +327,8 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={22} color="#000000" />
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={22} color="#000" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Create New Group</Text>
           <View style={styles.placeholder} />
@@ -337,15 +336,13 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
 
         {/* Challenge Title Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Challenge Title</Text>
-          <TextInput
-            style={styles.textInput}
+          <Input
+            label="Challenge Title"
             placeholder="What is This Group's Title?"
-            placeholderTextColor={Theme.colors.textTertiary}
             value={challengeTitle}
             onChangeText={setChallengeTitle}
             multiline
-            textAlign="center"
+            variant="light"
           />
         </View>
 
@@ -360,14 +357,12 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
               <Text style={styles.configSubtitle}>
                 Define what happens when a user misses a requirement
               </Text>
-              <TextInput
-                style={styles.textInput}
+              <Input
                 placeholder="Enter elimination rule..."
-                placeholderTextColor={Theme.colors.textTertiary}
                 value={eliminationRule}
                 onChangeText={setEliminationRule}
                 multiline
-                textAlign="center"
+                variant="light"
               />
             </View>
           )}
@@ -434,14 +429,12 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
                 <Text style={styles.configSubtitle}>
                   What needs to increase? Cardio done? Time spent coding?
                 </Text>
-                <TextInput
-                  style={styles.textInput}
+                <Input
                   placeholder="Enter interval type..."
-                  placeholderTextColor={Theme.colors.textTertiary}
                   value={intervalType}
                   onChangeText={setIntervalType}
                   multiline
-                  textAlign="center"
+                  variant="light"
                 />
               </View>
             </View>
@@ -473,14 +466,13 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
                   {requirements.map((requirement, index) => (
           <View key={index} style={styles.requirementRow}>
             <Text style={styles.bulletPoint}>*</Text>
-            <TextInput
-              style={styles.requirementInput}
+            <Input
               placeholder="Enter requirement or rule..."
-              placeholderTextColor={Theme.colors.textTertiary}
               value={requirement}
               onChangeText={(text) => updateRequirement(index, text)}
               multiline
-              textAlign="center"
+              variant="light"
+              containerStyle={{ flex: 1 }}
             />
             {requirements.length > 1 && (
               <TouchableOpacity
@@ -590,7 +582,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
 
           {loadingFriends ? (
             <View style={styles.loadingFriends}>
-              <Ionicons name="refresh" size={24} color={Theme.colors.gray400} />
+              <CircleLoader dotColor="#FF6B35" size="large" />
               <Text style={styles.loadingFriendsText}>Loading friends...</Text>
             </View>
           ) : friends.length === 0 ? (
@@ -636,7 +628,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
           <Button
             title="Create Group"
             onPress={handleCreateGroup}
-            variant="primary"
+            variant="secondary"
             style={styles.createButton}
           />
         </View>
@@ -833,22 +825,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Theme.layout.screenPadding,
-    paddingVertical: Theme.spacing.lg,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+    backgroundColor: '#F1F0ED',
   },
-  
   backButton: {
-    padding: Theme.spacing.sm,
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    padding: 8,
   },
-  
   headerTitle: {
-    ...Theme.typography.h2,
-    color: '#FF6B35',
+    fontSize: 28,
     fontWeight: '700',
+    color: '#000',
     flex: 1,
     textAlign: 'center',
   },
-  
   placeholder: {
     width: 48,
   },

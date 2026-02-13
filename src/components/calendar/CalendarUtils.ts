@@ -51,7 +51,15 @@ export const formatWeekRange = (startDate: Date, endDate: Date): string => {
 };
 
 export const getDateString = (date: Date): string => {
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0'); // +1 because months are 0-indexed
+  const day = String(date.getDate()).padStart(2, '0');
+  const dateString = `${year}-${month}-${day}`;
+  // Debug logging for first few calls
+  if (Math.random() < 0.01) { // Log ~1% of calls
+    console.log(`📅 getDateString: ${date.toString()} → ${dateString}`);
+  }
+  return dateString;
 };
 
 export const generateMonthData = (year: number, month: number) => {

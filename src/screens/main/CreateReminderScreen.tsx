@@ -14,6 +14,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Theme } from '../../constants/theme';
+import { Button } from '../../components/common/Button';
+import { Input } from '../../components/common/Input';
 import { useNavigation } from '@react-navigation/native';
 import { ReminderService } from '../../services/reminderService';
 import { auth } from '../../services/firebase';
@@ -443,42 +445,38 @@ export const CreateReminderScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Back Button */}
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={22} color="#000000" />
-        </TouchableOpacity>
-
-        <Text style={styles.mainTitle}>Create Reminder</Text>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={22} color="#000" />
+          </TouchableOpacity>
+          <Text style={styles.mainTitle}>Create Reminder</Text>
+          <View style={styles.placeholder} />
+        </View>
         <Text style={styles.mainSubtitle}>
           Set up a reminder to help you stay on track
         </Text>
 
         {/* Title Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Title</Text>
-          <TextInput
-            style={styles.textInput}
+          <Input
+            label="Title"
             placeholder="Enter reminder title..."
-            placeholderTextColor={Theme.colors.textTertiary}
             value={title}
             onChangeText={setTitle}
+            variant="light"
           />
         </View>
 
         {/* Description Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Description</Text>
-          <TextInput
-            style={[styles.textInput, styles.descriptionInput]}
+          <Input
+            label="Description"
             placeholder="Enter reminder description..."
-            placeholderTextColor={Theme.colors.textTertiary}
             value={description}
             onChangeText={setDescription}
             multiline
             numberOfLines={3}
+            variant="light"
           />
         </View>
 
@@ -563,30 +561,42 @@ const styles = StyleSheet.create({
     backgroundColor: '#F1F0ED',
   },
   
-  backButton: {
-    padding: Theme.spacing.sm,
-    marginBottom: Theme.spacing.md,
-    alignSelf: 'flex-start',
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+    backgroundColor: '#F1F0ED',
   },
-  
+  backButton: {
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    padding: 8,
+  },
+  placeholder: {
+    width: 48,
+  },
   content: {
     flex: 1,
     padding: Theme.spacing.md,
   },
-  
   mainTitle: {
-    ...Theme.typography.h2,
-    color: '#FF6B35',
-    textAlign: 'center',
-    marginBottom: Theme.spacing.xs,
+    fontSize: 28,
     fontWeight: '700',
+    color: '#000',
+    textAlign: 'center',
+    flex: 1,
   },
-  
   mainSubtitle: {
     ...Theme.typography.body,
     color: '#666666',
     textAlign: 'center',
     marginBottom: Theme.spacing.xl,
+    paddingHorizontal: 20,
   },
   
   section: {
@@ -678,7 +688,7 @@ const styles = StyleSheet.create({
     marginBottom: Theme.spacing.sm,
     paddingBottom: Theme.spacing.sm,
     borderBottomWidth: 1,
-    borderBottomColor: '#4B5563',
+    borderBottomColor: '#E5E5E5',
   },
   
   dayTimeRow: {
@@ -800,7 +810,7 @@ const styles = StyleSheet.create({
   bottomContainer: {
     padding: Theme.spacing.md,
     borderTopWidth: 1,
-    borderTopColor: '#374151',
+    borderTopColor: '#E5E5E5',
     backgroundColor: '#F1F0ED',
   },
   
@@ -841,7 +851,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Theme.spacing.lg,
     paddingVertical: Theme.spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: Theme.colors.border,
+    borderBottomColor: '#E5E5E5',
   },
   
   pickerModalButton: {

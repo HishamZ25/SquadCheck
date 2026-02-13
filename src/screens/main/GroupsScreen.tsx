@@ -13,23 +13,28 @@ import { Theme } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { GroupService } from '../../services/groupService';
 import { AuthService } from '../../services/authService';
+import { ChallengeService } from '../../services/challengeService';
 import { Avatar } from '../../components/common/Avatar';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { Group, User } from '../../types';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../services/firebase';
+import { GroupCard } from '../../components/group';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 interface GroupsScreenProps {
   navigation: any;
 }
 
 export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
+  const { colors } = useColorMode();
   const [groups, setGroups] = useState<Group[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialLoad, setInitialLoad] = useState(true);
   const [groupMembers, setGroupMembers] = useState<Record<string, User[]>>({});
   const [groupsCache, setGroupsCache] = useState<Group[] | null>(null);
+  const [challengeCountByGroupId, setChallengeCountByGroupId] = useState<Record<string, number>>({});
 
   // Load user on mount
   useEffect(() => {
@@ -58,18 +63,36 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
   useFocusEffect(
     useCallback(() => {
       if (user) {
-        // Use cache if available, otherwise load
         if (groupsCache) {
-          console.log('Using cached groups data');
           setGroups(groupsCache);
           setLoading(false);
           setInitialLoad(false);
+          // Ensure challenge counts are loaded (in case we had cache but counts weren't set yet)
+          loadChallengeCounts(groupsCache);
         } else {
           loadGroups();
         }
       }
     }, [user, groupsCache])
   );
+
+  const loadChallengeCounts = async (groupList: Group[]) => {
+    if (groupList.length === 0) return;
+    const counts: Record<string, number> = {};
+    await Promise.all(
+      groupList.map(async (g) => {
+        try {
+          const challenges = await ChallengeService.getGroupChallenges(g.id);
+          const fromQuery = challenges.length;
+          const fromDoc = Array.isArray((g as any).challengeIds) ? (g as any).challengeIds.length : 0;
+          counts[g.id] = Math.max(fromQuery, fromDoc);
+        } catch {
+          counts[g.id] = Array.isArray((g as any).challengeIds) ? (g as any).challengeIds.length : 0;
+        }
+      })
+    );
+    setChallengeCountByGroupId((prev) => ({ ...prev, ...counts }));
+  };
 
   const prefetchGroups = async () => {
     if (!user) return;
@@ -78,15 +101,14 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
       console.log('Prefetching groups...');
       const userGroups = await GroupService.getUserGroups(user.id);
       
-      // Load members for each group (in parallel)
       await loadGroupMembers(userGroups);
+      await loadChallengeCounts(userGroups);
       
       setGroupsCache(userGroups);
       setGroups(userGroups);
       console.log('Groups prefetched successfully');
     } catch (error) {
       console.error('Error prefetching groups:', error);
-      // Don't throw - prefetch is an optimization
     } finally {
       setLoading(false);
       setInitialLoad(false);
@@ -94,9 +116,14 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
   };
 
   const loadGroups = async () => {
-    if (!user) return;
+    if (!user || !user.id) {
+      console.log('⚠️ GroupsScreen: Cannot load groups - user or user.id is missing');
+      setLoading(false);
+      return;
+    }
     
     try {
+      console.log('📥 Loading groups for user:', user.id);
       setLoading(true);
       
       const userGroups = await GroupService.getUserGroups(user.id);
@@ -105,8 +132,8 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
       setGroups(userGroups);
       setGroupsCache(userGroups);
       
-      // Load members for each group (in parallel)
       await loadGroupMembers(userGroups);
+      await loadChallengeCounts(userGroups);
     } catch (error) {
       console.error('❌ Error loading groups:', error);
       Alert.alert('Error', 'Failed to load groups');
@@ -162,62 +189,16 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
   };
 
   const renderGroup = ({ item }: { item: Group }) => {
-    const maxAvatars = 5;
     const members = groupMembers[item.id] || [];
-    const displayMembers = members.slice(0, maxAvatars);
-    const extraCount = Math.max(0, item.memberIds.length - maxAvatars);
-    
-    return (
-      <TouchableOpacity 
-        style={styles.groupCard}
-        onPress={() => navigation.navigate('GroupChat', { groupId: item.id })}
-      >
-        {/* Top Row: Overlapping Avatars on Left, Challenge Badge on Right */}
-        <View style={styles.topRow}>
-          <View style={styles.overlappingAvatars}>
-            {displayMembers.map((member, index) => (
-              <View 
-                key={member.id} 
-                style={[
-                  styles.avatarCircle,
-                  { 
-                    zIndex: maxAvatars - index,
-                    marginLeft: index > 0 ? -10 : 0 
-                  }
-                ]}
-              >
-                <Avatar
-                  source={member.photoURL}
-                  initials={member.displayName?.charAt(0)?.toUpperCase() || '?'}
-                  size="sm"
-                />
-              </View>
-            ))}
-            {extraCount > 0 && (
-              <View 
-                style={[
-                  styles.avatarCircle,
-                  styles.extraAvatarBadge,
-                  { marginLeft: -10 }
-                ]}
-              >
-                <Text style={styles.extraAvatarText}>+{extraCount}</Text>
-              </View>
-            )}
-          </View>
-          
-          {/* Challenge Badge */}
-          <View style={styles.challengeBadge}>
-            <Ionicons name="trophy" size={16} color="#FFB800" />
-            <Text style={styles.challengeCount}>0</Text>
-          </View>
-        </View>
+    const challengeCount = challengeCountByGroupId[item.id] ?? 0;
 
-        {/* Middle: Group Info */}
-        <View style={styles.groupContent}>
-          <Text style={styles.groupName}>{item.name}</Text>
-        </View>
-      </TouchableOpacity>
+    return (
+      <GroupCard
+        group={item}
+        members={members}
+        challengeCount={challengeCount}
+        onPress={() => navigation.navigate('GroupChat', { groupId: item.id })}
+      />
     );
   };
 
@@ -226,12 +207,12 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {groups.length === 0 ? (
         <View style={styles.emptyState}>
-          <Ionicons name="people-outline" size={48} color="#666666" />
-          <Text style={styles.emptyTitle}>No Groups Yet</Text>
-          <Text style={styles.emptySubtitle}>Create your first accountability group to get started!</Text>
+          <Ionicons name="people-outline" size={48} color={colors.accent} />
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>No Groups Yet</Text>
+          <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>Create your first accountability group to get started!</Text>
         </View>
       ) : (
         <FlatList
@@ -243,18 +224,13 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
         />
       )}
 
-      {/* Floating Action Button - Create Group */}
       <View style={styles.fabContainer}>
         <TouchableOpacity
-          style={styles.fab}
+          style={[styles.fab, { backgroundColor: colors.surface, borderColor: colors.accent }]}
           onPress={() => navigation.navigate('CreateSimpleGroup')}
           activeOpacity={0.8}
         >
-          <Ionicons 
-            name="add" 
-            size={24} 
-            color="#FF6B35" 
-          />
+          <Ionicons name="add" size={24} color={colors.accent} />
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -264,7 +240,6 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F1F0ED',
     position: 'relative',
   },
   
@@ -274,7 +249,7 @@ const styles = StyleSheet.create({
   },
   
   listContent: {
-    paddingBottom: 100, // Account for FAB + tab bar
+    paddingBottom: 80, // Account for FAB + curved tab bar
   },
   
   groupCard: {
@@ -305,10 +280,10 @@ const styles = StyleSheet.create({
   
   avatarCircle: {
     borderWidth: 2.5,
-    borderColor: '#FFFFFF',
+    borderColor: '#FFB399',
     borderRadius: 18,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
+    shadowColor: '#FF6B35',
+    shadowOpacity: 0.12,
     shadowRadius: 2,
     shadowOffset: { width: 0, height: 1 },
     elevation: 1,
@@ -331,19 +306,19 @@ const styles = StyleSheet.create({
   challengeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF9E6',
+    backgroundColor: '#FFF5F0',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 10,
     gap: 4,
     borderWidth: 1,
-    borderColor: '#FFE8B3',
+    borderColor: '#FFB399',
   },
   
   challengeCount: {
     fontSize: 14,
     fontWeight: '800',
-    color: '#333',
+    color: '#FF6B35',
   },
   
   groupContent: {
@@ -352,7 +327,7 @@ const styles = StyleSheet.create({
   
   groupName: {
     fontSize: 17,
-    color: '#000000',
+    color: '#333',
     fontWeight: '700',
     marginBottom: 3,
     letterSpacing: -0.2,
@@ -370,38 +345,31 @@ const styles = StyleSheet.create({
     ...Theme.typography.h3,
     marginTop: Theme.spacing.md,
     marginBottom: Theme.spacing.sm,
-    color: '#000000',
     fontWeight: '700',
     textAlign: 'center',
   },
-  
   emptySubtitle: {
     ...Theme.typography.body,
-    color: '#000000',
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: Theme.spacing.xl,
     lineHeight: 20,
   },
-  
   fabContainer: {
     position: 'absolute',
-    bottom: 90, // Account for tab bar height (~70px) + padding
+    bottom: Theme.layout.fabBottomOffsetSocial,
     right: Theme.layout.screenPadding,
     width: 56,
     height: 56,
     zIndex: 1000,
   },
-  
   fab: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#FF6B35',
     ...Theme.shadows.lg,
     zIndex: 1000,
   },

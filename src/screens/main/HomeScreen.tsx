@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,26 +8,34 @@ import {
   TouchableOpacity,
   RefreshControl,
   Modal,
+  Animated,
+  Dimensions,
+  Alert,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { Button } from '../../components/common/Button';
 import { Avatar } from '../../components/common/Avatar';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
-import { CheckInComposer, type CheckInDraft } from '../../components/challenge/CheckInComposer';
+import { ChallengeCarouselCard } from '../../components/challenge/ChallengeCarouselCard';
+import { TiltCarousel } from '../../components/carousel';
+import { NotificationsModal } from '../../components/common/NotificationsModal';
+import { FriendshipService } from '../../services/friendshipService';
 import { Theme } from '../../constants/theme';
 import { GroupService } from '../../services/groupService';
 import { ChallengeService } from '../../services/challengeService';
-import { CheckInService } from '../../services/checkInService';
-import { MessageService } from '../../services/messageService';
 import { AuthService } from '../../services/authService';
 import { Group, User, Challenge } from '../../types';
-import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import { AlertCircle, Bell, Moon, Plus, Sun, Trophy, User as UserIcon, Users, X } from 'lucide-react-native';
 import { DicebearService } from '../../services/dicebearService';
 import * as ImagePicker from 'expo-image-picker';
-import { Alert } from 'react-native';
 import { doc, getDoc } from 'firebase/firestore';
 import { db, auth } from '../../services/firebase';
 import { dateKeys } from '../../utils/dateKeys';
 import { challengeEval } from '../../utils/challengeEval';
+import Svg, { Path } from 'react-native-svg';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 
 interface HomeScreenProps {
@@ -44,15 +52,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const [error, setError] = useState<string | null>(null);
   const [showActionMenu, setShowActionMenu] = useState(false);
   const [groupMembers, setGroupMembers] = useState<Record<string, User[]>>({});
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notificationCount, setNotificationCount] = useState(0);
   
-  // Section collapse states
-  const [toDoCollapsed, setToDoCollapsed] = useState(false);
-  const [finishedCollapsed, setFinishedCollapsed] = useState(false);
   
-  // Check-in modal state
-  const [checkInModalVisible, setCheckInModalVisible] = useState(false);
-  const [selectedChallengeForCheckIn, setSelectedChallengeForCheckIn] = useState<Challenge | null>(null);
-  const [checkInSubmitting, setCheckInSubmitting] = useState(false);
+  const hasLoadedOnce = useRef(false);
+  const scrollRef = useRef<any>(null);
+  const { mode, colors, toggleMode } = useColorMode();
 
   useEffect(() => {
     loadUserData();
@@ -66,8 +72,28 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   useEffect(() => {
     if (user) {
       loadGroups();
+      loadNotificationCount();
     }
   }, [user]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (user) {
+        loadGroups({ showLoading: false });
+        loadNotificationCount();
+      }
+    }, [user])
+  );
+
+  const loadNotificationCount = async () => {
+    if (!user?.id) return;
+    try {
+      const requests = await FriendshipService.getPendingRequests(user.id);
+      setNotificationCount(requests.length);
+    } catch (error) {
+      console.error('Error loading notification count:', error);
+    }
+  };
 
   const loadUserData = async () => {
     try {
@@ -82,46 +108,64 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     }
   };
 
-  const loadGroups = async () => {
-    if (!user) return;
-    
+  const loadGroups = async (options?: { showLoading?: boolean }) => {
+    if (!user || !user.id) {
+      console.log('⚠️ Cannot load groups - user or user.id is missing:', user);
+      return;
+    }
+    const isFirstLoad = !hasLoadedOnce.current;
+    const showLoading = options?.showLoading ?? isFirstLoad;
+    if (isFirstLoad) hasLoadedOnce.current = true;
+
     try {
-      setLoading(true);
+      if (showLoading) {
+        setLoading(true);
+      }
       setError(null);
-      
-      // Load groups and challenges in parallel
+
+      // Load groups and user-scoped challenges in parallel (minimal fetch to show list fast)
       const [userGroups, userChallenges] = await Promise.all([
         GroupService.getUserGroups(user.id),
         ChallengeService.getUserChallenges(user.id)
       ]);
-      
+
       setGroups(userGroups);
-      setChallenges(userChallenges);
-      
-      // Load members for each group and prefetch challenge details in parallel
-      await Promise.all([
+
+      // Merge with challenges from every group (same source as Group screen)
+      const groupChallengesArrays = await Promise.all(
+        userGroups.map((g) => ChallengeService.getGroupChallenges(g.id))
+      );
+      const byId = new Map<string, Challenge>();
+      for (const c of userChallenges) byId.set(c.id, c);
+      for (const list of groupChallengesArrays) {
+        for (const c of list) if (!byId.has(c.id)) byId.set(c.id, c);
+      }
+      const mergedChallenges = Array.from(byId.values()).sort(
+        (a, b) => (b.createdAt?.getTime?.() ?? 0) - (a.createdAt?.getTime?.() ?? 0)
+      );
+      setChallenges(mergedChallenges);
+      if (showLoading) setLoading(false);
+
+      // Prefetch details and members in background so list appears immediately
+      Promise.all([
         loadGroupMembers(userGroups),
-        prefetchChallengeDetails(userChallenges, user.id)
-      ]);
+        prefetchChallengeDetails(mergedChallenges, user.id)
+      ]).catch((err) => console.error('Background prefetch error:', err));
     } catch (error) {
       console.error('Error loading data:', error);
       setError('Failed to load data');
-    } finally {
       setLoading(false);
     }
   };
 
   const prefetchChallengeDetails = async (challenges: Challenge[], userId: string) => {
     try {
-      console.log('Prefetching challenge details for', challenges.length, 'challenges...');
-      
       // Fetch details for all challenges in parallel
       const detailsPromises = challenges.map(async (challenge) => {
         try {
           const details = await ChallengeService.getChallengeDetails(challenge.id, userId);
           return { id: challenge.id, details };
         } catch (error) {
-          console.error(`Error prefetching challenge ${challenge.id}:`, error);
           return null;
         }
       });
@@ -137,7 +181,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       });
       
       setChallengeDetailsCache(cache);
-      console.log('Prefetched details for', Object.keys(cache).length, 'challenges');
     } catch (error) {
       console.error('Error prefetching challenge details:', error);
       // Don't throw - prefetch is an optimization, not critical
@@ -234,19 +277,27 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     if (!user) return;
     setRefreshing(true);
     try {
-      // Don't clear cache immediately - keep old data visible during refresh
       const [userGroups, userChallenges] = await Promise.all([
         GroupService.getUserGroups(user.id),
         ChallengeService.getUserChallenges(user.id)
       ]);
       setGroups(userGroups);
-      setChallenges(userChallenges);
-      
-      // Refresh members and challenge details in parallel
-      // This will update the cache with fresh data
+      // Merge in challenges from every group (same as loadGroups)
+      const groupChallengesArrays = await Promise.all(
+        userGroups.map((g) => ChallengeService.getGroupChallenges(g.id))
+      );
+      const byId = new Map<string, Challenge>();
+      for (const c of userChallenges) byId.set(c.id, c);
+      for (const list of groupChallengesArrays) {
+        for (const c of list) if (!byId.has(c.id)) byId.set(c.id, c);
+      }
+      const mergedChallenges = Array.from(byId.values()).sort(
+        (a, b) => (b.createdAt?.getTime?.() ?? 0) - (a.createdAt?.getTime?.() ?? 0)
+      );
+      setChallenges(mergedChallenges);
       await Promise.all([
         loadGroupMembers(userGroups),
-        prefetchChallengeDetails(userChallenges, user.id)
+        prefetchChallengeDetails(mergedChallenges, user.id)
       ]);
     } catch (error) {
       console.error('Error refreshing data:', error);
@@ -258,7 +309,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const handleNewChallenge = () => {
     console.log('New Challenge pressed');
     setShowActionMenu(false);
-    navigation.navigate('GroupType', { isSolo: false });
+    navigation.navigate('SelectGroup');
   };
 
   const handleNewSoloChallenge = () => {
@@ -273,28 +324,43 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     navigation.navigate('CreateReminder');
   };
 
-  const renderSectionHeader = (title: string, count: number, collapsed: boolean, onToggle: () => void) => (
-    <View style={styles.sectionHeader}>
-      <View style={styles.collapseButtonSpacer} />
-      <View style={styles.sectionHeaderContent}>
-        <View style={styles.sectionDividerLeft} />
-        <View style={styles.sectionLabelContainer}>
-          <Text style={styles.sectionLabel}>{title}</Text>
-          <View style={styles.sectionCount}>
-            <Text style={styles.sectionCountText}>{count}</Text>
-          </View>
+  const SEPARATOR_WIDTH = Dimensions.get('window').width - (Theme.layout.screenPadding || 24) * 2;
+  const DIP_DEPTH = 12;
+  const CURVE_INSET = 32;
+  const STROKE = 2.5;
+  const SVG_HEIGHT = DIP_DEPTH + STROKE * 2;
+
+  const renderSectionBlock = (title: string, count: number, variant: 'todo' | 'finished') => {
+    const lineColor = variant === 'todo' ? 'rgba(255,107,53,0.55)' : 'rgba(34,197,94,0.55)';
+    const mid = SEPARATOR_WIDTH / 2;
+    const y0 = STROKE / 2;
+    const left = mid - CURVE_INSET;
+    const right = mid + CURVE_INSET;
+    const dipY = y0 + DIP_DEPTH;
+    const controlOffset = CURVE_INSET * 0.6;
+    // Smooth single flowing curve across the whole width
+    const path = [
+      `M 0 ${y0}`,
+      `C ${left - controlOffset} ${y0}, ${left} ${y0 + DIP_DEPTH * 0.4}, ${left} ${y0 + DIP_DEPTH * 0.8}`,
+      `C ${mid - CURVE_INSET * 0.3} ${dipY}, ${mid + CURVE_INSET * 0.3} ${dipY}, ${right} ${y0 + DIP_DEPTH * 0.8}`,
+      `C ${right} ${y0 + DIP_DEPTH * 0.4}, ${right + controlOffset} ${y0}, ${SEPARATOR_WIDTH} ${y0}`,
+    ].join(' ');
+    return (
+      <View style={styles.sectionBlock}>
+        <Text style={[styles.sectionLabel, { color: colors.text }]}>
+          {title}
+        </Text>
+        <View style={[styles.sectionCount, variant === 'todo' && styles.sectionCountTodo, variant === 'finished' && styles.sectionCountFinished]}>
+          <Text style={styles.sectionCountText}>{count}</Text>
         </View>
-        <View style={styles.sectionDividerRight} />
+        <View style={styles.curvedSeparatorWrap}>
+          <Svg width={SEPARATOR_WIDTH} height={SVG_HEIGHT} viewBox={`0 0 ${SEPARATOR_WIDTH} ${SVG_HEIGHT}`} style={styles.curvedSeparatorSvg}>
+            <Path d={path} stroke={lineColor} strokeWidth={STROKE} fill="none" strokeLinecap="butt" strokeLinejoin="round" />
+          </Svg>
+        </View>
       </View>
-      <TouchableOpacity onPress={onToggle} style={styles.collapseButton}>
-        <Ionicons 
-          name={collapsed ? 'chevron-down' : 'chevron-up'} 
-          size={18} 
-          color="#666" 
-        />
-      </TouchableOpacity>
-    </View>
-  );
+    );
+  };
 
   const renderGroupItem = (item: Group) => {
     const maxAvatars = 5;
@@ -341,9 +407,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             )}
           </View>
           
-          {/* Challenge Badge - Note: challengeIds removed from new schema */}
+          {/* Challenge count */}
           <View style={styles.challengeBadge}>
-            <Ionicons name="trophy" size={16} color="#FFB800" />
             <Text style={styles.challengeCount}>0</Text>
           </View>
         </View>
@@ -362,6 +427,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     const details = challengeDetailsCache[challenge.id];
     return details.checkInsForCurrentPeriod?.some((ci: any) => ci.userId === user?.id && ci.status === 'completed') || false;
   };
+
+  const isUserEliminated = (challenge: Challenge): boolean => {
+    if (!user?.id || (challenge as any).type !== 'elimination') return false;
+    const details = challengeDetailsCache[challenge.id];
+    const members: any[] = details?.challengeMembers ?? [];
+    const me = members.find((m: any) => m.userId === user.id);
+    return me?.state === 'eliminated';
+  };
   
   const handleCheckInPress = async (challenge: Challenge, e: any) => {
     e.stopPropagation(); // Prevent card navigation
@@ -378,90 +451,34 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       }
     }
     
-    setSelectedChallengeForCheckIn(challenge);
-    setCheckInModalVisible(true);
-  };
-  
-  const handleCheckInSubmit = async (draft: CheckInDraft) => {
-    if (!selectedChallengeForCheckIn || !user) return;
-    
-    try {
-      setCheckInSubmitting(true);
-      const challenge = challengeDetailsCache[selectedChallengeForCheckIn.id]?.challenge || selectedChallengeForCheckIn;
-      
-      // Build payload with only defined values
-      const payload: any = {};
-      if (draft.booleanValue !== undefined) payload.booleanValue = draft.booleanValue;
-      if (draft.numberValue !== undefined) payload.numberValue = draft.numberValue;
-      if (draft.textValue !== undefined) payload.textValue = draft.textValue;
-      if (draft.timerSeconds !== undefined) payload.timerSeconds = draft.timerSeconds;
-      
-      // Upload attachments to Firebase Storage first
-      let uploadedAttachments = draft.attachments || [];
-      if (draft.attachments && draft.attachments.length > 0) {
-        uploadedAttachments = await Promise.all(
-          draft.attachments.map(async (attachment) => {
-            try {
-              const uploadedUrl = await MessageService.uploadImage(attachment.uri);
-              return { type: attachment.type, uri: uploadedUrl };
-            } catch (error) {
-              console.error('Error uploading attachment:', error);
-              return attachment;
-            }
-          })
-        );
-      }
-      
-      // Save check-in to Firebase
-      await CheckInService.submitChallengeCheckIn(
-        challenge.id,
-        user.id,
-        challenge.groupId || null,
-        challenge.cadence?.unit || 'daily',
-        payload,
-        uploadedAttachments
+    // Check if already submitted for the period we would submit to (same logic as backend)
+    const details = challengeDetailsCache[challenge.id];
+    const challengeForDue = details?.challenge || challenge;
+    const dueTimeLocal = challengeForDue.due?.dueTimeLocal || '23:59';
+    const timezoneOffset = challengeForDue.due?.timezoneOffset ?? new Date().getTimezoneOffset();
+    const submissionPeriodKey = dateKeys.getSubmissionPeriodDayKey(dueTimeLocal, timezoneOffset);
+    const alreadySubmittedForThisPeriod =
+      details?.allRecentCheckIns?.some(
+        (ci: any) => ci.userId === user?.id && ci.period?.dayKey === submissionPeriodKey
       );
-      
-      // If it's a group challenge, send message to group chat
-      if (challenge.groupId) {
-        const caption = draft.textValue || 'Completed check-in';
-        const imageUrl = uploadedAttachments.length > 0 ? uploadedAttachments[0].uri : null;
-        
-        await MessageService.sendCheckInMessage(
-          challenge.groupId,
-          user.id,
-          user.displayName || 'User',
-          caption,
-          imageUrl,
-          challenge.title
-        );
-      }
-      
-      // Refresh challenges
-      await loadGroups();
-      
-      setCheckInModalVisible(false);
-      setSelectedChallengeForCheckIn(null);
-      Alert.alert('Success', 'Check-in submitted successfully!');
-    } catch (error) {
-      console.error('Error submitting check-in:', error);
-      Alert.alert('Error', 'Failed to submit check-in');
-    } finally {
-      setCheckInSubmitting(false);
+    if (alreadySubmittedForThisPeriod) {
+      Alert.alert('Already Submitted', 'You have already checked in for this period!');
+      return;
     }
+
+    navigation.navigate('CheckIn', {
+      challengeId: challenge.id,
+      details: challengeDetailsCache[challenge.id] ?? undefined,
+    });
   };
 
   const getChallengeStatus = (challenge: Challenge): string => {
+    if (isUserEliminated(challenge)) return 'Eliminated';
     // Safety check for old schema challenges
     if (!challenge.cadence || !challenge.due) {
       return 'In progress';
     }
-    
-    // This is a placeholder - you'll need to query CheckIns to get real status
-    // For now, return sample statuses based on challenge type
     const now = new Date();
-    const hour = now.getHours();
-    
     if (challenge.type === 'deadline' && challenge.due.deadlineDate) {
       const deadline = new Date(challenge.due.deadlineDate);
       const daysLeft = Math.ceil((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
@@ -480,19 +497,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         if (details?.checkInsForCurrentPeriod) {
           const myCheckIn = details.checkInsForCurrentPeriod.find((ci: any) => ci.userId === user?.id);
           if (myCheckIn?.createdAt) {
-            const timestamp = typeof myCheckIn.createdAt === 'number' ? myCheckIn.createdAt : myCheckIn.createdAt.toMillis?.() || Date.now();
+            const raw = myCheckIn.createdAt;
+            const timestamp = raw instanceof Date ? raw.getTime()
+              : typeof raw === 'number' ? raw
+              : (raw as any)?.toMillis?.() ?? Date.now();
             return 'Completed ' + challengeEval.formatTimestamp(timestamp);
           }
         }
         return 'Completed today';
       }
-      if (hour < 6) {
-        const dueTime = challenge.due?.dueTimeLocal ? dateKeys.format12Hour(challenge.due.dueTimeLocal) : '11:59 PM';
-        return 'Due today at ' + dueTime;
-      } else if (hour >= 18) {
-        return 'Due in 5h 42min';
-      }
-      return 'Due today';
+      
+      // Show time remaining until due
+      const dueTimeLocal = challenge.due?.dueTimeLocal || '23:59';
+      const timeRemaining = dateKeys.getTimeRemaining(dueTimeLocal);
+      return `Due in ${timeRemaining}`;
     }
     
     if (challenge.cadence.unit === 'weekly' && challenge.cadence.requiredCount) {
@@ -505,91 +523,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     return 'In progress';
   };
 
-  const renderChallengeItem = (item: Challenge) => {
-    // Check if it's a group challenge (has groupId) or solo (no groupId)
-    const isSolo = !item.groupId;
-    const status = getChallengeStatus(item);
-    const isCompleted = isChallengeCompleted(item);
-    
-    return (
-      <TouchableOpacity
-        key={item.id}
-        style={[
-          styles.challengeCard,
-          { borderColor: isCompleted ? '#4CAF50' : '#FF6B35' }
-        ]}
-        onPress={async () => {
-          try {
-            // Use cached data if available, otherwise fetch
-            let challengeDetails = challengeDetailsCache[item.id];
-            
-            if (!challengeDetails) {
-              console.log('Cache miss for challenge', item.id, '- fetching...');
-              challengeDetails = await ChallengeService.getChallengeDetails(item.id, auth.currentUser?.uid || '');
-              // Update cache
-              setChallengeDetailsCache(prev => ({ ...prev, [item.id]: challengeDetails }));
-            } else {
-              console.log('Cache hit for challenge', item.id);
-            }
-            
-            navigation.navigate('ChallengeDetail', challengeDetails);
-          } catch (error) {
-            console.error('Error loading challenge details:', error);
-            Alert.alert('Error', 'Failed to load challenge details');
-          }
-        }}
-      >
-        {/* Top Row: Challenge Name and Icon */}
-        <View style={styles.challengeTopRow}>
-          <Text style={styles.challengeTitle} numberOfLines={1}>
-            {item.title || 'Untitled Challenge'}
-          </Text>
-          <View style={styles.challengeIcon}>
-            <Ionicons 
-              name={isSolo ? 'person' : 'people'} 
-              size={20} 
-              color="#666" 
-            />
-          </View>
-        </View>
-
-        {/* Description */}
-        {item.description && (
-          <Text style={styles.challengeDescription} numberOfLines={2}>
-            {item.description}
-          </Text>
-        )}
-
-        {/* Status Line and Check-in Button */}
-        <View style={styles.challengeFooter}>
-          <View style={styles.challengeStatusContainer}>
-            <View style={styles.challengeStatusDot} />
-            <Text style={styles.challengeStatusText}>{status}</Text>
-          </View>
-          
-          {/* Check-in Button */}
-          <TouchableOpacity
-            style={[
-              styles.checkInButton,
-              isCompleted && styles.checkInButtonCompleted
-            ]}
-            onPress={(e) => handleCheckInPress(item, e)}
-            disabled={isCompleted}
-          >
-            <Ionicons 
-              name={isCompleted ? 'checkmark-circle' : 'add-circle'} 
-              size={20} 
-              color="#FFF" 
-            />
-            <Text style={styles.checkInButtonText}>
-              {isCompleted ? 'Done' : 'Check In'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
   const renderEmptyState = (message: string) => (
     <View style={styles.emptyState}>
       <Text style={styles.emptyStateText}>{message}</Text>
@@ -598,7 +531,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
   const renderErrorState = () => (
     <View style={styles.errorState}>
-      <Ionicons name="alert-circle-outline" size={64} color={Theme.colors.error} />
+      <AlertCircle size={64} color={Theme.colors.error} />
       <Text style={styles.errorStateTitle}>Something went wrong</Text>
       <Text style={styles.errorStateSubtitle}>{error}</Text>
       <Button
@@ -610,27 +543,104 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     </View>
   );
 
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const headerHeight = scrollY.interpolate({
+    inputRange: [0, 100],
+    outputRange: [160, 108],
+    extrapolate: 'clamp',
+  });
+  const headerScale = scrollY.interpolate({
+    inputRange: [0, 100],
+    outputRange: [1, 0.59],
+    extrapolate: 'clamp',
+  });
+  const subtitleMarginBottom = scrollY.interpolate({
+    inputRange: [0, 100],
+    outputRange: [4, 32],
+    extrapolate: 'clamp',
+  });
+
+  const handleMainScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    if (y > 0 && scrollRef.current) {
+      // Prevent scrolling down into the content; keep it pinned while
+      // still allowing pull-down to refresh (negative offsets).
+      scrollRef.current.scrollTo({ y: 0, animated: false });
+      scrollY.setValue(0);
+    } else {
+      scrollY.setValue(y);
+    }
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
-      {/* User Profile Section - Centered */}
-      <View style={styles.userSection}>
-        <Avatar
-          source={user?.photoURL}
-          initials={user?.displayName?.charAt(0)}
-          size="xl"
-          onPress={() => {
-            console.log('Avatar pressed in HomeScreen!');
-            handleAvatarPress();
-          }}
-        />
-        <TouchableOpacity onPress={() => navigation.navigate('Settings', { user })}>
-          <Text style={styles.userName}>{user?.displayName || 'Loading...'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('Settings', { user })}>
-          <Text style={styles.userTitle}>{user?.title || 'Accountability Seeker'}</Text>
-        </TouchableOpacity>
-        
-      </View>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Bell Icon - Top Right */}
+      <TouchableOpacity
+        style={[
+          styles.themeToggle,
+          {
+            backgroundColor: colors.surface,
+            shadowColor: colors.accent,
+            borderWidth: 2,
+            borderColor: colors.accent,
+          },
+        ]}
+        onPress={toggleMode}
+        activeOpacity={0.7}
+      >
+        {mode === 'light' ? (
+          <Moon size={20} color={colors.accent} />
+        ) : (
+          <Sun size={20} color={colors.accent} />
+        )}
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[
+          styles.bellIcon,
+          {
+            backgroundColor: colors.surface,
+            shadowColor: colors.accent,
+            borderWidth: 2,
+            borderColor: colors.accent,
+          },
+        ]}
+        onPress={() => setShowNotifications(true)}
+        activeOpacity={0.7}
+      >
+        <Bell size={26} color="#FF6B35" />
+        {notificationCount > 0 && (
+          <View style={styles.notificationBadge}>
+            <Text style={styles.notificationBadgeText}>
+              {notificationCount > 9 ? '9+' : notificationCount}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
+      {/* User Profile Section - Shrinks on scroll */}
+      <Animated.View style={[styles.userSectionWrapper, { height: headerHeight }]}>
+        <Animated.View style={[styles.userSection, { transform: [{ scale: headerScale }] }]}>
+          <Avatar
+            source={user?.photoURL}
+            initials={user?.displayName?.charAt(0)}
+            size="xl"
+            onPress={() => {
+              console.log('Avatar pressed in HomeScreen!');
+              handleAvatarPress();
+            }}
+          />
+          <TouchableOpacity onPress={() => navigation.navigate('Settings', { user })}>
+            <Text style={[styles.userName, { color: colors.text }]}>{user?.displayName || 'Loading...'}</Text>
+          </TouchableOpacity>
+          <Animated.View style={{ marginBottom: subtitleMarginBottom }}>
+            <TouchableOpacity onPress={() => navigation.navigate('Settings', { user })}>
+              <Text style={[styles.userTitle, { color: colors.textSecondary }]}>
+                {user?.title || 'Accountability Seeker'}
+              </Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </Animated.View>
+      </Animated.View>
 
       {/* Content Sections */}
       {loading ? (
@@ -638,9 +648,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       ) : error ? (
         renderErrorState()
       ) : (
-        <ScrollView
+        <Animated.ScrollView
+          ref={scrollRef}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
+          onScroll={handleMainScroll}
+          scrollEventThrottle={16}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -650,69 +663,102 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
             />
           }
         >
-          {/* To Do Section */}
+          {/* To Do Section - always open, curved separator with dip + arrow */}
           {(() => {
             const incompleteChallenges = challenges.filter(c => !isChallengeCompleted(c));
-            const toDoCount = incompleteChallenges.length; // Only challenges + reminders, no groups
-            
+            const toDoCount = incompleteChallenges.length;
             return (
               <View style={styles.section}>
-                {renderSectionHeader('To Do', toDoCount, toDoCollapsed, () => setToDoCollapsed(!toDoCollapsed))}
-                {!toDoCollapsed && (
-                  <View style={styles.cardsContainer}>
-                    {/* Incomplete Challenges */}
-                    {incompleteChallenges.map(challenge => (
-                      <View key={`challenge-${challenge.id}`}>
-                        {renderChallengeItem(challenge)}
-                      </View>
-                    ))}
-                    
-                    {/* TODO: Add incomplete reminders here when implemented */}
-                    
-                    {toDoCount === 0 && renderEmptyState('Nothing to do - great job!')}
-                  </View>
+                {renderSectionBlock('TO DO', toDoCount, 'todo')}
+                {incompleteChallenges.length > 0 ? (
+                  <TiltCarousel
+                      data={incompleteChallenges}
+                      keyExtractor={(c) => c.id}
+                      contentPadding={Theme.layout.screenPadding}
+                      renderItem={({ item: challenge }) => {
+                        const groupName = challenge.groupId
+                          ? groups.find(g => g.id === challenge.groupId)?.name
+                          : undefined;
+                        return (
+                          <ChallengeCarouselCard
+                            challenge={challenge}
+                            groupName={groupName}
+                            groupMembers={challenge.groupId ? (groupMembers[challenge.groupId] || []).map(u => ({ id: u.id, photoURL: u.photoURL, displayName: u.displayName })) : undefined}
+                            isCompleted={false}
+                            status={getChallengeStatus(challenge)}
+                            isEliminated={isUserEliminated(challenge)}
+                            onPress={() => {
+                              const cached = challengeDetailsCache[challenge.id];
+                              if (cached) {
+                                navigation.navigate('ChallengeDetail', cached);
+                              } else {
+                                navigation.navigate('ChallengeDetail', {
+                                  challengeId: challenge.id,
+                                  currentUserId: auth.currentUser?.uid || '',
+                                });
+                              }
+                            }}
+                            onCheckInPress={(e) => handleCheckInPress(challenge, e)}
+                          />
+                        );
+                      }}
+                    />
+                ) : (
+                  renderEmptyState('Nothing to do - great job!')
                 )}
               </View>
             );
           })()}
 
-          {/* Finished Section */}
+          {/* Finished Section - always open, curved separator with dip + arrow */}
           {(() => {
             const completedChallenges = challenges.filter(c => isChallengeCompleted(c));
             const finishedCount = completedChallenges.length;
-            
             return (
-              <View style={styles.section}>
-                {renderSectionHeader('Finished', finishedCount, finishedCollapsed, () => setFinishedCollapsed(!finishedCollapsed))}
-                {!finishedCollapsed && (
-                  <View style={styles.cardsContainer}>
-                    {/* Completed Challenges */}
-                    {completedChallenges.map(challenge => (
-                      <View key={`challenge-${challenge.id}`}>
-                        {renderChallengeItem(challenge)}
-                      </View>
-                    ))}
-                    
-                    {/* TODO: Add completed reminders here when implemented */}
-                    
-                    {finishedCount === 0 && renderEmptyState('No completed items yet')}
-                  </View>
+              <View style={[styles.section, styles.sectionFinished]}>
+                {renderSectionBlock('FINISHED', finishedCount, 'finished')}
+                {completedChallenges.length > 0 ? (
+                  <TiltCarousel
+                      data={completedChallenges}
+                      keyExtractor={(c) => c.id}
+                      contentPadding={Theme.layout.screenPadding}
+                      renderItem={({ item: challenge }) => {
+                        const groupName = challenge.groupId
+                          ? groups.find(g => g.id === challenge.groupId)?.name
+                          : undefined;
+                        return (
+                          <ChallengeCarouselCard
+                            challenge={challenge}
+                            groupName={groupName}
+                            groupMembers={challenge.groupId ? (groupMembers[challenge.groupId] || []).map(u => ({ id: u.id, photoURL: u.photoURL, displayName: u.displayName })) : undefined}
+                            isCompleted={true}
+                            status={getChallengeStatus(challenge)}
+                            isEliminated={isUserEliminated(challenge)}
+                            onPress={() => {
+                              const cached = challengeDetailsCache[challenge.id];
+                              if (cached) {
+                                navigation.navigate('ChallengeDetail', cached);
+                              } else {
+                                navigation.navigate('ChallengeDetail', {
+                                  challengeId: challenge.id,
+                                  currentUserId: auth.currentUser?.uid || '',
+                                });
+                              }
+                            }}
+                            onCheckInPress={(e) => handleCheckInPress(challenge, e)}
+                          />
+                        );
+                      }}
+                    />
+                ) : (
+                  renderEmptyState('No completed items yet')
                 )}
               </View>
             );
           })()}
           
-          {/* Empty state if no content at all */}
-          {challenges.length === 0 && (
-            <View style={styles.emptyState}>
-              <Ionicons name="planet-outline" size={64} color="#CCC" />
-              <Text style={styles.emptyStateTitle}>Get Started</Text>
-              <Text style={styles.emptyStateSubtitle}>Create a challenge or reminder to begin</Text>
-            </View>
-          )}
-          
-          <View style={{ height: 120 }} />
-        </ScrollView>
+          {/* Empty spacer trimmed so content doesn't scroll unnecessarily */}
+        </Animated.ScrollView>
       )}
 
       {/* Floating Action Button with Circular Speed Dial */}
@@ -729,89 +775,73 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           <>
             {/* Group Challenge Button - 12 o'clock (above FAB) */}
             <TouchableOpacity
-              style={[styles.actionButton, styles.actionButtonTopRight]}
+              style={[
+                styles.actionButton,
+                styles.actionButtonTopRight,
+                { backgroundColor: colors.surface, borderColor: colors.accent },
+              ]}
               onPress={handleNewChallenge}
               activeOpacity={0.8}
             >
-              <Ionicons name="trophy-outline" size={24} color="#FF6B35" />
+              <Trophy size={24} color="#FF6B35" />
             </TouchableOpacity>
 
             {/* Solo Challenge Button - 4 o'clock (bottom right) */}
             <TouchableOpacity
-              style={[styles.actionButton, styles.actionButtonBottomRight]}
+              style={[
+                styles.actionButton,
+                styles.actionButtonBottomRight,
+                { backgroundColor: colors.surface, borderColor: colors.accent },
+              ]}
               onPress={handleNewSoloChallenge}
               activeOpacity={0.8}
             >
-              <Ionicons name="person-outline" size={24} color="#FF6B35" />
+              <UserIcon size={24} color="#FF6B35" />
             </TouchableOpacity>
 
             {/* Reminder Button - 8 o'clock (bottom left) */}
             <TouchableOpacity
-              style={[styles.actionButton, styles.actionButtonBottomLeft]}
+              style={[
+                styles.actionButton,
+                styles.actionButtonBottomLeft,
+                { backgroundColor: colors.surface, borderColor: colors.accent },
+              ]}
               onPress={handleNewReminder}
               activeOpacity={0.8}
             >
-              <Ionicons name="alert-circle-outline" size={24} color="#FF6B35" />
+              <AlertCircle size={24} color="#FF6B35" />
             </TouchableOpacity>
           </>
         )}
 
         {/* Main FAB Button */}
         <TouchableOpacity
-          style={[styles.fab, showActionMenu && styles.fabActive]}
+          style={[
+            styles.fab,
+            showActionMenu && styles.fabActive,
+            { backgroundColor: colors.surface, borderColor: colors.accent },
+          ]}
           onPress={() => setShowActionMenu(!showActionMenu)}
           activeOpacity={0.8}
         >
-          <Ionicons 
-            name={showActionMenu ? "close" : "add"} 
-            size={24} 
-            color="#FF6B35" 
-          />
+          {showActionMenu ? (
+            <X size={24} color="#FF6B35" />
+          ) : (
+            <Plus size={24} color="#FF6B35" />
+          )}
         </TouchableOpacity>
       </View>
       
-      {/* Check-In Modal */}
-      {selectedChallengeForCheckIn && (
-        <Modal
-          visible={checkInModalVisible}
-          animationType="slide"
-          presentationStyle="pageSheet"
-          onRequestClose={() => {
-            if (!checkInSubmitting) {
-              setCheckInModalVisible(false);
-              setSelectedChallengeForCheckIn(null);
-            }
+      {/* Notifications Modal */}
+      {user && (
+        <NotificationsModal
+          visible={showNotifications}
+          onClose={() => {
+            setShowNotifications(false);
+            loadNotificationCount(); // Refresh count when modal closes
           }}
-        >
-          <SafeAreaView style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity
-                onPress={() => {
-                  if (!checkInSubmitting) {
-                    setCheckInModalVisible(false);
-                    setSelectedChallengeForCheckIn(null);
-                  }
-                }}
-                disabled={checkInSubmitting}
-              >
-                <Ionicons name="close" size={28} color="#000" />
-              </TouchableOpacity>
-              <Text style={styles.modalTitle}>{selectedChallengeForCheckIn.title}</Text>
-              <View style={{ width: 28 }} />
-            </View>
-            
-            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-              <CheckInComposer
-                inputType={selectedChallengeForCheckIn.submission?.inputType || 'boolean'}
-                unitLabel={selectedChallengeForCheckIn.submission?.unitLabel}
-                minValue={selectedChallengeForCheckIn.submission?.minValue}
-                requireAttachment={selectedChallengeForCheckIn.submission?.requireAttachment || false}
-                onSubmit={handleCheckInSubmit}
-                disabled={checkInSubmitting}
-              />
-            </ScrollView>
-          </SafeAreaView>
-        </Modal>
+          currentUserId={user.id}
+        />
       )}
     </SafeAreaView>
   );
@@ -820,106 +850,109 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F1F0ED',
+    backgroundColor: '#F5F3F0',
     position: 'relative',
   },
-  
-  userSection: {
-    flex: 0,
+  themeToggle: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    zIndex: 1000,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
-    padding: Theme.layout.screenPadding,
-    paddingTop: Theme.spacing.lg,
+    justifyContent: 'center',
+    shadowColor: '#FF6B35',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
   
-  
+  userSectionWrapper: {
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 108,
+  },
+  userSection: {
+    alignItems: 'center',
+    paddingHorizontal: Theme.layout.screenPadding,
+    paddingTop: Theme.spacing.md,
+    paddingBottom: Theme.spacing.xs,
+  },
   userName: {
     ...Theme.typography.h2,
-    marginTop: Theme.spacing.sm,
-    marginBottom: Theme.spacing.xs,
+    marginTop: Theme.spacing.xs,
+    marginBottom: 2,
     textAlign: 'center',
     color: '#000000',
   },
   
   userTitle: {
     ...Theme.typography.body,
-    marginBottom: Theme.spacing.md,
+    marginBottom: 0,
     textAlign: 'center',
     color: '#666666',
   },
   
   scrollContent: {
     paddingHorizontal: Theme.layout.screenPadding,
+    paddingTop: Theme.spacing.sm,
     paddingBottom: 20,
   },
-  
   section: {
     marginBottom: Theme.spacing.lg,
   },
-  
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
+  sectionFinished: {
+    marginTop: -16,
   },
   
-  collapseButtonSpacer: {
-    width: 26,
-  },
-  
-  sectionHeaderContent: {
-    flex: 1,
-    flexDirection: 'row',
+  sectionBlock: {
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 6,
   },
-  
-  sectionDividerLeft: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#DDD',
-    marginRight: 12,
-  },
-  
-  sectionDividerRight: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#DDD',
-    marginLeft: 12,
-  },
-  
-  sectionLabelContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  
   sectionLabel: {
-    fontSize: 13,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#333',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
+    marginBottom: 4,
   },
-  
+  sectionLabelTodo: {
+    color: '#1A1A1A',
+  },
+  sectionLabelFinished: {
+    color: '#1A1A1A',
+  },
   sectionCount: {
-    backgroundColor: '#FF6B35',
-    paddingHorizontal: 7,
-    paddingVertical: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: 10,
-    minWidth: 22,
+    minWidth: 28,
     alignItems: 'center',
+    marginBottom: 2,
   },
-  
+  sectionCountTodo: {
+    backgroundColor: '#FF6B35',
+  },
+  sectionCountFinished: {
+    backgroundColor: '#22C55E',
+  },
   sectionCountText: {
-    fontSize: 11,
-    fontWeight: '800',
+    fontSize: 12,
+    fontWeight: '700',
     color: '#FFFFFF',
   },
-  
-  collapseButton: {
-    padding: 4,
-    width: 26,
+  curvedSeparatorWrap: {
     alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  curvedSeparatorSvg: {
+    overflow: 'visible',
   },
   
   cardsContainer: {
@@ -971,14 +1004,9 @@ const styles = StyleSheet.create({
   },
   
   groupCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    backgroundColor: '#FFFBF7',
+    borderRadius: 14,
     padding: 14,
-    ...Theme.shadows.sm,
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 3,
     borderWidth: 2,
     borderColor: '#FF6B35',
   },
@@ -1060,18 +1088,12 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   
-  // Challenge Card Styles
+  // Challenge Card Styles (used by legacy list; carousel uses ChallengeCarouselCard)
   challengeCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    backgroundColor: '#FFFBF7',
+    borderRadius: 14,
     padding: 14,
     borderWidth: 2,
-    // borderColor is set dynamically based on completion status
-    ...Theme.shadows.sm,
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 3,
   },
   
   challengeTopRow: {
@@ -1082,12 +1104,16 @@ const styles = StyleSheet.create({
   },
   
   challengeTitle: {
-    flex: 1,
     fontSize: 17,
     color: '#000000',
     fontWeight: '700',
     letterSpacing: -0.2,
-    marginRight: 12,
+    marginBottom: 2,
+  },
+  challengeDate: {
+    fontSize: 13,
+    color: '#FF6B35',
+    fontWeight: '600',
   },
   
   challengeIcon: {
@@ -1156,31 +1182,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#F1F0ED',
-  },
-  
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-    backgroundColor: '#FFF',
-  },
-  
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#000',
-  },
-  
-  modalContent: {
-    flex: 1,
-    padding: 16,
-  },
   
   emptyState: {
     justifyContent: 'center',
@@ -1251,7 +1252,7 @@ const styles = StyleSheet.create({
   
   fabContainer: {
     position: 'absolute',
-    bottom: 90, // Account for tab bar height (~70px) + padding
+    bottom: Theme.layout.fabBottomOffsetHome,
     right: Theme.layout.screenPadding,
     width: 56,
     height: 56,
@@ -1310,5 +1311,43 @@ const styles = StyleSheet.create({
     transform: [{ translateX: 0 }],
   },
   
+  bellIcon: {
+    position: 'absolute',
+    top: 60,
+    right: 20,
+    zIndex: 1000,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#FF6B35',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  
+  notificationBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  
+  notificationBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+    paddingHorizontal: 4,
+  },
 
 }); 

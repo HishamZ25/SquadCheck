@@ -1,5 +1,9 @@
 /**
- * Date key utilities for challenge periods
+ * Date key utilities for challenge periods.
+ *
+ * NOTE: For timezone-correct calculations using IANA timezone strings, prefer
+ * the functions in ./dueTime.ts. The helpers here use the device's local time
+ * or a numeric offset for backward compatibility with legacy challenge data.
  */
 
 export const dateKeys = {
@@ -88,18 +92,111 @@ export const dateKeys = {
   },
 
   /**
-   * Format time remaining
+   * Get the current check-in period key based on due time
+   * The check-in period runs from dueTime yesterday to dueTime today
+   * Example: If due at 21:00 and it's 22:00 on Saturday, the current period is Sunday
+   */
+  getCurrentCheckInPeriod(dueTimeLocal: string = '23:59'): string {
+    const now = new Date();
+    const [hours, minutes] = dueTimeLocal.split(':').map(Number);
+    
+    // Check if we've passed today's due time
+    const todayDueTime = new Date(now);
+    todayDueTime.setHours(hours, minutes, 0, 0);
+    
+    if (now > todayDueTime) {
+      // Past due time - we're in tomorrow's check-in period
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      return this.getDayKey(tomorrow);
+    } else {
+      // Before due time - we're in today's check-in period
+      return this.getDayKey(now);
+    }
+  },
+
+  /**
+   * Get the day key that would be used for a submission RIGHT NOW.
+   * Uses the same timezone-aware logic as CheckInService.submitChallengeCheckIn.
+   * Use this when checking "already submitted" so we match the period that will actually be recorded.
+   */
+  getSubmissionPeriodDayKey(
+    dueTimeLocal: string = '23:59',
+    challengeTimezoneOffset?: number
+  ): string {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    let dayKey = `${year}-${month}-${day}`;
+
+    if (dueTimeLocal && challengeTimezoneOffset !== undefined) {
+      const userOffset = now.getTimezoneOffset();
+      const [hours, minutes] = dueTimeLocal.split(':').map(Number);
+      const offsetDiff = challengeTimezoneOffset - userOffset;
+      const adjustedHours = (hours * 60 + minutes + offsetDiff) / 60;
+      const userLocalHours = Math.floor(adjustedHours);
+      const userLocalMinutes = Math.floor((adjustedHours % 1) * 60);
+      const todayDueTime = new Date(now);
+      todayDueTime.setHours(userLocalHours, userLocalMinutes, 0, 0);
+
+      if (now > todayDueTime) {
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        dayKey = this.getDayKey(tomorrow);
+      }
+    } else {
+      dayKey = this.getCurrentCheckInPeriod(dueTimeLocal);
+    }
+    return dayKey;
+  },
+
+  /**
+   * Get the next due Date for countdown (today or tomorrow at dueTimeLocal, or deadline date).
+   * For deadline type pass deadlineDate (YYYY-MM-DD); otherwise uses dueTimeLocal.
+   */
+  getNextDueDate(
+    dueTimeLocal: string = '23:59',
+    deadlineDate?: string | null,
+    type?: string
+  ): Date {
+    const now = new Date();
+    if (type === 'deadline' && deadlineDate) {
+      const [y, m, d] = deadlineDate.split('-').map(Number);
+      const end = new Date(y, (m || 1) - 1, d || 1, 23, 59, 59, 999);
+      return end;
+    }
+    const [hours, minutes] = dueTimeLocal.split(':').map(Number);
+    let dueTime = new Date(now);
+    dueTime.setHours(hours, minutes, 0, 0);
+    if (now > dueTime) {
+      dueTime = new Date(now);
+      dueTime.setDate(dueTime.getDate() + 1);
+      dueTime.setHours(hours, minutes, 0, 0);
+    }
+    return dueTime;
+  },
+
+  /**
+   * Format time remaining until due time
+   * If past due time today, calculates time until due time tomorrow
    */
   getTimeRemaining(dueTimeLocal: string = '23:59'): string {
     const now = new Date();
     const [hours, minutes] = dueTimeLocal.split(':').map(Number);
     
-    const dueTime = new Date(now);
+    // Try today's due time first
+    let dueTime = new Date(now);
     dueTime.setHours(hours, minutes, 0, 0);
     
-    const diffMs = dueTime.getTime() - now.getTime();
-    if (diffMs <= 0) return 'Overdue';
+    // If we're past today's due time, use tomorrow's due time
+    if (now > dueTime) {
+      dueTime = new Date(now);
+      dueTime.setDate(dueTime.getDate() + 1);
+      dueTime.setHours(hours, minutes, 0, 0);
+    }
     
+    const diffMs = dueTime.getTime() - now.getTime();
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
     const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
     

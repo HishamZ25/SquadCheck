@@ -8,7 +8,10 @@ import {
   Platform,
   Alert,
   TouchableOpacity,
+  ScrollView,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
@@ -70,13 +73,11 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
         throw new Error('User not authenticated');
       }
 
-      // Navigation will be handled automatically by auth state change listener
-      // No need to navigate manually - the app will switch to main screens
-      Alert.alert(
-        'Success!',
-        'Account created successfully. You can now create or join accountability groups!',
-        [{ text: 'OK' }]
-      );
+      // Mark as new signup to trigger onboarding flow
+      await AsyncStorage.setItem('isNewSignup', 'true');
+      
+      // Navigate to email confirmation screen
+      navigation.navigate('EmailConfirmation', { email });
     } catch (error: any) {
       Alert.alert('Sign Up Failed', error.message || 'An error occurred during sign up');
     } finally {
@@ -95,79 +96,97 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.content}
-      >
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={22} color="#000000" />
-          </TouchableOpacity>
-          <View style={styles.logoContainer}>
-            <Ionicons name="people-circle" size={64} color={Theme.colors.secondary} />
-          </View>
-          <Text style={styles.title}>Join SquadCheck</Text>
-          <Text style={styles.subtitle}>Create your account to get started</Text>
-        </View>
+    <View style={styles.container}>
+      <View style={styles.background}>
+        {/* Abstract orange shapes */}
+        <View style={styles.shape1} />
+        <View style={styles.shape2} />
+        <View style={styles.shape3} />
+      </View>
+      <SafeAreaView style={styles.safeArea}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.content}
+        >
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.headerContainer}>
+              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
+              </TouchableOpacity>
+            </View>
 
-        <View style={styles.form}>
-          <Input
-            label="Display Name"
-            placeholder="Enter your display name"
-            value={displayName}
-            onChangeText={setDisplayName}
-            autoCapitalize="words"
-            autoCorrect={false}
-            error={errors.displayName}
-          />
+            <View style={styles.header}>
+              <Text style={styles.title}>Create Account</Text>
+              <Text style={styles.subtitle}>Join SquadCheck and start your journey</Text>
+            </View>
 
-          <Input
-            label="Email"
-            placeholder="Enter your email"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            error={errors.email}
-          />
+            <View style={styles.formContainer}>
+              <Input
+                label="Display Name"
+                placeholder="Enter your display name"
+                value={displayName}
+                onChangeText={setDisplayName}
+                autoCapitalize="words"
+                autoCorrect={false}
+                error={errors.displayName}
+                variant="dark"
+              />
 
-          <Input
-            label="Password"
-            placeholder="Enter your password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            error={errors.password}
-          />
+              <Input
+                label="Email"
+                placeholder="Enter your email"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                error={errors.email}
+                variant="dark"
+              />
 
-          <Input
-            label="Confirm Password"
-            placeholder="Confirm your password"
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry
-            error={errors.confirmPassword}
-          />
+              <Input
+                label="Password"
+                placeholder="Enter your password"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                error={errors.password}
+                variant="dark"
+              />
 
-          <Button
-            title="Create Account"
-            onPress={handleSignUp}
-            loading={loading}
-            fullWidth
-            variant="secondary"
-            style={styles.signUpButton}
-          />
+              <Input
+                label="Confirm Password"
+                placeholder="Confirm your password"
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                secureTextEntry
+                error={errors.confirmPassword}
+                variant="dark"
+              />
 
-          <TouchableOpacity onPress={handleSignIn} style={styles.signInLink}>
-            <Text style={styles.signInText}>
-              Already have an account? <Text style={styles.signInLinkText}>Sign In</Text>
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+              <Button
+                title="Create Account"
+                onPress={handleSignUp}
+                loading={loading}
+                fullWidth
+                variant="secondary"
+                style={styles.signUpButton}
+              />
+
+              <TouchableOpacity onPress={handleSignIn} style={styles.signInLink}>
+                <Text style={styles.signInText}>
+                  Already have an account? <Text style={styles.signInLinkText}>Sign In</Text>
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
   );
 };
 
@@ -175,67 +194,94 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F1F0ED',
-    position: 'relative',
   },
-  
+  background: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#F1F0ED',
+  },
+  shape1: {
+    position: 'absolute',
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: 'rgba(255, 107, 53, 0.08)',
+    top: 60,
+    right: -60,
+  },
+  shape2: {
+    position: 'absolute',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(255, 138, 101, 0.06)',
+    bottom: 120,
+    left: -50,
+  },
+  shape3: {
+    position: 'absolute',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(229, 90, 43, 0.05)',
+    top: '45%',
+    left: 30,
+  },
+  safeArea: {
+    flex: 1,
+  },
   content: {
     flex: 1,
-    padding: Theme.layout.screenPadding,
   },
-  
-  header: {
-    alignItems: 'center',
-    marginTop: Theme.spacing.xxl,
-    marginBottom: Theme.spacing.xl,
-    position: 'relative',
+  scrollContent: {
+    flexGrow: 1,
+    padding: 32,
   },
-  
+  headerContainer: {
+    marginBottom: 24,
+  },
   backButton: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    padding: Theme.spacing.sm,
-  },
-  
-  logoContainer: {
-    marginBottom: Theme.spacing.lg,
-  },
-  
-  title: {
-    ...Theme.typography.h2,
-    marginBottom: Theme.spacing.sm,
-    textAlign: 'center',
-    color: '#000000',
-    fontWeight: '700',
-  },
-  
-  subtitle: {
-    ...Theme.typography.bodySmall,
-    textAlign: 'center',
-    color: '#000000',
-  },
-  
-  form: {
-    flex: 1,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F0F0F0',
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  
-  signUpButton: {
-    marginTop: Theme.spacing.lg,
-    marginBottom: Theme.spacing.md,
+  header: {
+    alignItems: 'center',
+    marginBottom: 40,
   },
-  
+  title: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#666666',
+    textAlign: 'center',
+  },
+  formContainer: {
+    gap: 16,
+    marginBottom: 32,
+  },
+  signUpButton: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
   signInLink: {
-    marginTop: Theme.spacing.md,
+    marginTop: 16,
     alignItems: 'center',
   },
   signInText: {
-    ...Theme.typography.body,
-    color: '#000000',
+    fontSize: 15,
+    color: '#666666',
     textAlign: 'center',
   },
   signInLinkText: {
-    ...Theme.typography.body,
+    fontSize: 15,
     color: '#FF6B35',
     fontWeight: '600',
   },

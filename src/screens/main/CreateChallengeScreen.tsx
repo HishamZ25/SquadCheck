@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Theme } from '../../constants/theme';
 import { Button } from '../../components/common/Button';
+import { Input } from '../../components/common/Input';
 import { Avatar } from '../../components/common/Avatar';
 import { ChallengeService } from '../../services/challengeService';
 import { FriendshipService } from '../../services/friendshipService';
@@ -23,6 +24,7 @@ import { GroupService } from '../../services/groupService';
 import { AuthService } from '../../services/authService';
 import { auth } from '../../services/firebase';
 import { Group } from '../../types';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 type ChallengeType = 'elimination' | 'deadline' | 'progression';
 
@@ -45,6 +47,7 @@ interface Friend {
 }
 
 export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ navigation, route }) => {
+  const { colors } = useColorMode();
   const challengeType = route?.params?.challengeType || 'elimination';
   const isSolo = route?.params?.isSolo || false;
   const groupId = route?.params?.groupId;
@@ -70,12 +73,17 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
   const [participantMode, setParticipantMode] = useState<'friends' | 'group'>('friends');
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [userGroups, setUserGroups] = useState<Group[]>([]);
+  const [challengeCountByGroupId, setChallengeCountByGroupId] = useState<Record<string, number>>({});
 
   // Load friends and groups when component mounts (only for group challenges)
   useEffect(() => {
-    if (!isSolo && !groupId) {
-      loadFriends();
-      loadUserGroups();
+    if (!isSolo) {
+      if (!groupId) {
+        loadFriends();
+        loadUserGroups();
+      } else {
+        loadUserGroups(); // Load groups so we have memberIds for the selected group
+      }
     }
   }, [isSolo, groupId]);
 
@@ -107,10 +115,29 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
       if (currentUser) {
         const groups = await GroupService.getUserGroups(currentUser.id);
         setUserGroups(groups);
+        await loadChallengeCounts(groups);
       }
     } catch (error) {
       console.error('Error loading user groups:', error);
     }
+  };
+
+  const loadChallengeCounts = async (groups: Group[]) => {
+    if (!groups.length) return;
+    const counts: Record<string, number> = {};
+    await Promise.all(
+      groups.map(async (g) => {
+        try {
+          const challenges = await ChallengeService.getGroupChallenges(g.id);
+          const fromQuery = challenges.length;
+          const fromDoc = Array.isArray((g as any).challengeIds) ? (g as any).challengeIds.length : 0;
+          counts[g.id] = Math.max(fromQuery, fromDoc);
+        } catch {
+          counts[g.id] = Array.isArray((g as any).challengeIds) ? (g as any).challengeIds.length : 0;
+        }
+      })
+    );
+    setChallengeCountByGroupId((prev) => ({ ...prev, ...counts }));
   };
 
   const toggleFriendSelection = (friendId: string) => {
@@ -257,30 +284,31 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
         assessmentTime
       );
 
-      // Add participants if it's a group challenge without a groupId
-      if (!isSolo && !groupId) {
-        if (participantMode === 'friends') {
-          const selectedFriends = friends.filter(friend => friend.selected);
-          for (const friend of selectedFriends) {
-            await ChallengeService.addParticipant(challengeId, friend.id);
-          }
+      // Add participants for group challenges
+      if (!isSolo) {
+        let membersToAdd: string[] = [];
+        if (groupId) {
+          const selectedGroup = userGroups.find(g => g.id === groupId);
+          if (selectedGroup) membersToAdd = selectedGroup.memberIds;
+        } else if (participantMode === 'friends') {
+          membersToAdd = friends.filter(f => f.selected).map(f => f.id);
         } else if (participantMode === 'group' && selectedGroupId) {
-          // Add all group members as participants (creator is already included)
           const selectedGroup = userGroups.find(g => g.id === selectedGroupId);
-          if (selectedGroup) {
-            for (const memberId of selectedGroup.memberIds) {
-              if (memberId !== currentUser.uid) {
-                await ChallengeService.addParticipant(challengeId, memberId);
-              }
-            }
+          if (selectedGroup) membersToAdd = selectedGroup.memberIds;
+        }
+        for (const memberId of membersToAdd) {
+          if (memberId !== currentUser.uid) {
+            await ChallengeService.addParticipant(challengeId, memberId);
           }
         }
       }
 
+      // Navigate first, then show success (so user sees their new challenge on home)
+      navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
       Alert.alert(
         'Challenge Created! 🎉', 
         `Your challenge "${challengeTitle}" has been created successfully!`,
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
+        [{ text: 'OK' }]
       );
     } catch (error) {
       console.error('Error creating challenge:', error);
@@ -290,51 +318,38 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
 
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={22} color="#000000" />
+        <View style={[styles.header, { backgroundColor: colors.background }]}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={22} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>
-            Configure Challenge
-          </Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Configure Challenge</Text>
           <View style={styles.placeholder} />
         </View>
 
-        {/* Challenge Title Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Challenge Title</Text>
-          <TextInput
-            style={styles.textInput}
+          <Input
+            label="Challenge Title"
             placeholder="What is This Challenge's Title?"
-            placeholderTextColor={Theme.colors.textTertiary}
             value={challengeTitle}
             onChangeText={setChallengeTitle}
             multiline
-            textAlign="center"
+            variant="light"
           />
         </View>
 
-        {/* Description Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Description</Text>
-          <TextInput
-            style={styles.textInput}
+          <Input
+            label="Description"
             placeholder="What is this challenge about?"
-            placeholderTextColor={Theme.colors.textTertiary}
             value={description}
             onChangeText={setDescription}
             multiline
-            textAlign="center"
+            variant="light"
           />
         </View>
 
-        {/* Challenge Configuration Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
             Configure {challengeType.charAt(0).toUpperCase() + challengeType.slice(1)} Challenge
@@ -345,14 +360,12 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
               <Text style={styles.configSubtitle}>
                 Define what happens when a user misses a requirement
               </Text>
-              <TextInput
-                style={styles.textInput}
+              <Input
                 placeholder="Enter elimination rule..."
-                placeholderTextColor={Theme.colors.textTertiary}
                 value={eliminationRule}
                 onChangeText={setEliminationRule}
                 multiline
-                textAlign="center"
+                variant="light"
               />
             </View>
           )}
@@ -366,8 +379,9 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
                 <View style={styles.dateInput}>
                   <Text style={styles.dateLabel}>Start Date</Text>
                   <TouchableOpacity 
-                    style={styles.dateButton}
+                    style={styles.dateButton} 
                     onPress={() => setShowStartDatePicker(true)}
+                    activeOpacity={0.7}
                   >
                     <Text style={styles.dateButtonText}>
                       {startDate ? startDate.toLocaleDateString() : 'Select start date'}
@@ -375,12 +389,12 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
                     <Ionicons name="calendar" size={20} color={Theme.colors.textTertiary} />
                   </TouchableOpacity>
                 </View>
-                
                 <View style={styles.dateInput}>
                   <Text style={styles.dateLabel}>End Date</Text>
                   <TouchableOpacity 
-                    style={styles.dateButton}
+                    style={styles.dateButton} 
                     onPress={() => setShowEndDatePicker(true)}
+                    activeOpacity={0.7}
                   >
                     <Text style={styles.dateButtonText}>
                       {endDate ? endDate.toLocaleDateString() : 'Select end date'}
@@ -399,14 +413,14 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
                   Choose the amount of time between each interval progression
                 </Text>
                 <View style={styles.numberInputContainer}>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.numberButton}
                     onPress={() => setProgressionDuration(Math.max(1, progressionDuration - 1))}
                   >
                     <Ionicons name="remove" size={20} color={Theme.colors.white} />
                   </TouchableOpacity>
                   <Text style={styles.numberValue}>{progressionDuration} days</Text>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.numberButton}
                     onPress={() => setProgressionDuration(progressionDuration + 1)}
                   >
@@ -414,64 +428,48 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
                   </TouchableOpacity>
                 </View>
               </View>
-              
               <View style={styles.progressionInput}>
                 <Text style={styles.configSubtitle}>
                   What needs to increase? Cardio done? Time spent coding?
                 </Text>
-                <TextInput
-                  style={styles.textInput}
+                <Input
                   placeholder="Enter interval type..."
-                  placeholderTextColor={Theme.colors.textTertiary}
                   value={intervalType}
                   onChangeText={setIntervalType}
                   multiline
-                  textAlign="center"
+                  variant="light"
                 />
               </View>
             </View>
           )}
 
-          {/* AI Assessment Time */}
           <View style={styles.assessmentTimeContainer}>
             <Text style={styles.configSubtitle}>
               Choose when the AI will assess what users posted (default: midnight)
             </Text>
-            <TouchableOpacity 
-              style={styles.timeInputButton}
-              onPress={() => setShowTimePicker(true)}
-            >
+            <TouchableOpacity style={styles.timeInputButton} onPress={() => setShowTimePicker(true)}>
               <Text style={styles.timeInputButtonText}>
-                {assessmentTime.toLocaleTimeString([], { 
-                  hour: '2-digit', 
-                  minute: '2-digit' 
-                })}
+                {assessmentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </Text>
               <Ionicons name="time" size={20} color={Theme.colors.textTertiary} />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Requirements & Rules Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Requirements & Rules</Text>
           {requirements.map((requirement, index) => (
             <View key={index} style={styles.requirementRow}>
               <Text style={styles.bulletPoint}>*</Text>
-              <TextInput
-                style={styles.requirementInput}
+              <Input
                 placeholder="Enter requirement or rule..."
-                placeholderTextColor={Theme.colors.textTertiary}
                 value={requirement}
                 onChangeText={(text) => updateRequirement(index, text)}
-                multiline
-                textAlign="center"
+                variant="light"
+                containerStyle={{ flex: 1 }}
               />
               {requirements.length > 1 && (
-                <TouchableOpacity
-                  style={styles.removeButton}
-                  onPress={() => removeRequirement(index)}
-                >
+                <TouchableOpacity style={styles.removeButton} onPress={() => removeRequirement(index)}>
                   <Ionicons name="close-circle" size={20} color={Theme.colors.error} />
                 </TouchableOpacity>
               )}
@@ -483,171 +481,117 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
           </TouchableOpacity>
         </View>
 
-        {/* Participants Section - Only for group challenges without groupId */}
         {!isSolo && !groupId && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Add Participants</Text>
-            
-            {/* Mode Selection Toggle */}
             <View style={styles.modeToggleContainer}>
               <TouchableOpacity
-                style={[
-                  styles.modeToggleButton,
-                  participantMode === 'friends' && styles.modeToggleButtonActive
-                ]}
+                style={[styles.modeToggleButton, participantMode === 'friends' && styles.modeToggleButtonActive]}
                 onPress={() => setParticipantMode('friends')}
               >
-                <Ionicons 
-                  name="person-add-outline" 
-                  size={20} 
-                  color={participantMode === 'friends' ? Theme.colors.white : Theme.colors.secondary} 
-                />
-                <Text style={[
-                  styles.modeToggleText,
-                  participantMode === 'friends' && styles.modeToggleTextActive
-                ]}>
-                  Invite Friends
-                </Text>
+                <Ionicons name="person-add-outline" size={20} color={participantMode === 'friends' ? Theme.colors.white : Theme.colors.secondary} />
+                <Text style={[styles.modeToggleText, participantMode === 'friends' && styles.modeToggleTextActive]}>Invite Friends</Text>
               </TouchableOpacity>
-              
               <TouchableOpacity
-                style={[
-                  styles.modeToggleButton,
-                  participantMode === 'group' && styles.modeToggleButtonActive
-                ]}
+                style={[styles.modeToggleButton, participantMode === 'group' && styles.modeToggleButtonActive]}
                 onPress={() => setParticipantMode('group')}
               >
-                <Ionicons 
-                  name="people-outline" 
-                  size={20} 
-                  color={participantMode === 'group' ? Theme.colors.white : Theme.colors.secondary} 
-                />
-                <Text style={[
-                  styles.modeToggleText,
-                  participantMode === 'group' && styles.modeToggleTextActive
-                ]}>
-                  Select Group
-                </Text>
+                <Ionicons name="people-outline" size={20} color={participantMode === 'group' ? Theme.colors.white : Theme.colors.secondary} />
+                <Text style={[styles.modeToggleText, participantMode === 'group' && styles.modeToggleTextActive]}>Select Group</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Friends Selection */}
             {participantMode === 'friends' && (
-              <>
-                {friends.length === 0 ? (
-                  <View style={styles.noFriends}>
-                    <Ionicons name="people-outline" size={32} color={Theme.colors.gray400} />
-                    <Text style={styles.noFriendsText}>No friends yet</Text>
-                    <Text style={styles.noFriendsSubtext}>Add friends to invite them to challenges</Text>
-                  </View>
-                ) : (
-                  <>
-                    {friends.map((friend) => (
-                      <TouchableOpacity
-                        key={friend.id}
-                        style={[styles.friendItem, friend.selected && styles.friendItemSelected]}
-                        onPress={() => toggleFriendSelection(friend.id)}
-                      >
-                        <Avatar
-                          source={friend.photoURL}
-                          initials={friend.displayName.charAt(0)}
-                          size="md"
-                        />
-                        <Text style={styles.friendName}>{friend.displayName}</Text>
-                        <View style={styles.selectionIndicator}>
-                          {friend.selected ? (
-                            <Ionicons name="checkmark-circle" size={24} color={Theme.colors.secondary} />
-                          ) : (
-                            <Ionicons name="ellipse-outline" size={24} color={Theme.colors.textTertiary} />
-                          )}
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-                  </>
-                )}
-              </>
+              friends.length === 0 ? (
+                <View style={styles.noFriends}>
+                  <Ionicons name="people-outline" size={32} color={Theme.colors.gray400} />
+                  <Text style={styles.noFriendsText}>No friends yet</Text>
+                  <Text style={styles.noFriendsSubtext}>Add friends to invite them to challenges</Text>
+                </View>
+              ) : (
+                friends.map((friend) => (
+                  <TouchableOpacity
+                    key={friend.id}
+                    style={[styles.friendItem, friend.selected && styles.friendItemSelected]}
+                    onPress={() => toggleFriendSelection(friend.id)}
+                  >
+                    <Avatar source={friend.photoURL} initials={friend.displayName.charAt(0)} size="md" />
+                    <Text style={styles.friendName}>{friend.displayName}</Text>
+                    <View style={styles.selectionIndicator}>
+                      {friend.selected ? (
+                        <Ionicons name="checkmark-circle" size={24} color={Theme.colors.secondary} />
+                      ) : (
+                        <Ionicons name="ellipse-outline" size={24} color={Theme.colors.textTertiary} />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )
             )}
 
-            {/* Group Selection */}
             {participantMode === 'group' && (
-              <>
-                {userGroups.length === 0 ? (
-                  <View style={styles.noFriends}>
-                    <Ionicons name="people-outline" size={32} color={Theme.colors.gray400} />
-                    <Text style={styles.noFriendsText}>No groups yet</Text>
-                    <Text style={styles.noFriendsSubtext}>Create a group first to add it to a challenge</Text>
-                  </View>
-                ) : (
-                  <>
-                    {userGroups.map((group) => (
-                      <TouchableOpacity
-                        key={group.id}
-                        style={[styles.groupItem, selectedGroupId === group.id && styles.groupItemSelected]}
-                        onPress={() => toggleGroupSelection(group.id)}
-                      >
-                        <View style={styles.groupItemContent}>
-                          <Ionicons name="people" size={24} color={Theme.colors.secondary} />
-                          <View style={styles.groupItemInfo}>
-                            <Text style={styles.groupItemName}>{group.name}</Text>
-                            <Text style={styles.groupItemDescription} numberOfLines={1}>
-                              {group.description}
-                            </Text>
-                            <Text style={styles.groupItemMembers}>
-                              {group.memberIds.length} member{group.memberIds.length !== 1 ? 's' : ''}
-                            </Text>
-                          </View>
-                        </View>
-                        <View style={styles.selectionIndicator}>
-                          {selectedGroupId === group.id ? (
-                            <Ionicons name="checkmark-circle" size={24} color={Theme.colors.secondary} />
-                          ) : (
-                            <Ionicons name="ellipse-outline" size={24} color={Theme.colors.textTertiary} />
-                          )}
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-                  </>
-                )}
-              </>
+              userGroups.length === 0 ? (
+                <View style={styles.noFriends}>
+                  <Ionicons name="people-outline" size={32} color={Theme.colors.gray400} />
+                  <Text style={styles.noFriendsText}>No groups yet</Text>
+                  <Text style={styles.noFriendsSubtext}>Create a group first to add it to a challenge</Text>
+                </View>
+              ) : (
+                userGroups.map((group) => (
+                  <TouchableOpacity
+                    key={group.id}
+                    style={[styles.groupItem, selectedGroupId === group.id && styles.groupItemSelected]}
+                    onPress={() => toggleGroupSelection(group.id)}
+                  >
+                    <View style={styles.groupItemContent}>
+                      <Ionicons name="people" size={24} color={Theme.colors.secondary} />
+                      <View style={styles.groupItemInfo}>
+                        <Text style={styles.groupItemName}>{group.name}</Text>
+                        <Text style={styles.groupItemDescription} numberOfLines={1}>
+                          {(group as { description?: string }).description || ''}
+                        </Text>
+                        <Text style={styles.groupItemMembers}>
+                          {group.memberIds.length} member{group.memberIds.length !== 1 ? 's' : ''}
+                        </Text>
+                        <Text style={styles.groupItemChallenges}>
+                          {(challengeCountByGroupId[group.id] ?? 0)} challenge
+                          {(challengeCountByGroupId[group.id] ?? 0) === 1 ? '' : 's'}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.selectionIndicator}>
+                      {selectedGroupId === group.id ? (
+                        <Ionicons name="checkmark-circle" size={24} color={Theme.colors.secondary} />
+                      ) : (
+                        <Ionicons name="ellipse-outline" size={24} color={Theme.colors.textTertiary} />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )
             )}
           </View>
         )}
 
-        {/* Create Challenge Button */}
         <View style={styles.createButtonContainer}>
-          <Button
-            title="Create Challenge"
-            onPress={handleCreateChallenge}
-            variant="primary"
-            style={styles.createButton}
-          />
+          <Button title="Create Challenge" onPress={handleCreateChallenge} variant="secondary" style={styles.createButton} />
         </View>
       </ScrollView>
 
-      {/* Date and Time Pickers - Same as CreateGroupScreen */}
       {Platform.OS === 'ios' ? (
         <>
-          <Modal
-            visible={showStartDatePicker}
-            transparent={true}
-            animationType="slide"
-            onRequestClose={() => setShowStartDatePicker(false)}
-          >
+          <Modal visible={showStartDatePicker} transparent animationType="slide" onRequestClose={() => setShowStartDatePicker(false)}>
             <View style={styles.pickerModalContainer}>
               <View style={styles.pickerModalContent}>
                 <View style={styles.pickerModalHeader}>
-                  <TouchableOpacity
-                    onPress={() => setShowStartDatePicker(false)}
-                    style={styles.pickerModalButton}
-                  >
+                  <TouchableOpacity onPress={() => setShowStartDatePicker(false)} style={styles.pickerModalButton}>
                     <Text style={styles.pickerModalCancelText}>Cancel</Text>
                   </TouchableOpacity>
                   <Text style={styles.pickerModalTitle}>Select Start Date</Text>
                   <TouchableOpacity
                     onPress={() => {
-                      if (startDate) {
-                        setShowStartDatePicker(false);
-                      }
+                      setStartDate(startDate || new Date());
+                      setShowStartDatePicker(false);
                     }}
                     style={styles.pickerModalButton}
                   >
@@ -658,39 +602,31 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
                   value={startDate || new Date()}
                   mode="date"
                   display="spinner"
-                  onChange={(event, selectedDate) => {
-                    if (selectedDate) {
-                      setStartDate(selectedDate);
-                    }
-                  }}
-                  textColor={Theme.colors.white}
+                  onChange={(_, d) => d && setStartDate(d)}
+                  textColor="#000000"
                   accentColor={Theme.colors.secondary}
                 />
               </View>
             </View>
           </Modal>
 
-          <Modal
-            visible={showEndDatePicker}
-            transparent={true}
-            animationType="slide"
-            onRequestClose={() => setShowEndDatePicker(false)}
-          >
+          <Modal visible={showEndDatePicker} transparent animationType="slide" onRequestClose={() => setShowEndDatePicker(false)}>
             <View style={styles.pickerModalContainer}>
               <View style={styles.pickerModalContent}>
                 <View style={styles.pickerModalHeader}>
-                  <TouchableOpacity
-                    onPress={() => setShowEndDatePicker(false)}
-                    style={styles.pickerModalButton}
-                  >
+                  <TouchableOpacity onPress={() => setShowEndDatePicker(false)} style={styles.pickerModalButton}>
                     <Text style={styles.pickerModalCancelText}>Cancel</Text>
                   </TouchableOpacity>
                   <Text style={styles.pickerModalTitle}>Select End Date</Text>
                   <TouchableOpacity
                     onPress={() => {
-                      if (endDate) {
-                        setShowEndDatePicker(false);
+                      const chosen = endDate || new Date();
+                      if (startDate && chosen <= startDate) {
+                        Alert.alert('Invalid Date', 'End date must be after start date');
+                        return;
                       }
+                      setEndDate(chosen);
+                      setShowEndDatePicker(false);
                     }}
                     style={styles.pickerModalButton}
                   >
@@ -701,42 +637,29 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
                   value={endDate || new Date()}
                   mode="date"
                   display="spinner"
-                  onChange={(event, selectedDate) => {
-                    if (selectedDate) {
-                      if (startDate && selectedDate <= startDate) {
-                        Alert.alert('Invalid Date', 'End date must be after start date');
-                        return;
-                      }
-                      setEndDate(selectedDate);
+                  onChange={(_, d) => {
+                    if (d && startDate && d <= startDate) {
+                      Alert.alert('Invalid Date', 'End date must be after start date');
+                      return;
                     }
+                    d && setEndDate(d);
                   }}
-                  textColor={Theme.colors.white}
+                  textColor="#000000"
                   accentColor={Theme.colors.secondary}
                 />
               </View>
             </View>
           </Modal>
 
-          <Modal
-            visible={showTimePicker}
-            transparent={true}
-            animationType="slide"
-            onRequestClose={() => setShowTimePicker(false)}
-          >
+          <Modal visible={showTimePicker} transparent animationType="slide" onRequestClose={() => setShowTimePicker(false)}>
             <View style={styles.pickerModalContainer}>
               <View style={styles.pickerModalContent}>
                 <View style={styles.pickerModalHeader}>
-                  <TouchableOpacity
-                    onPress={() => setShowTimePicker(false)}
-                    style={styles.pickerModalButton}
-                  >
+                  <TouchableOpacity onPress={() => setShowTimePicker(false)} style={styles.pickerModalButton}>
                     <Text style={styles.pickerModalCancelText}>Cancel</Text>
                   </TouchableOpacity>
                   <Text style={styles.pickerModalTitle}>Select Time</Text>
-                  <TouchableOpacity
-                    onPress={() => setShowTimePicker(false)}
-                    style={styles.pickerModalButton}
-                  >
+                  <TouchableOpacity onPress={() => setShowTimePicker(false)} style={styles.pickerModalButton}>
                     <Text style={styles.pickerModalDoneText}>Done</Text>
                   </TouchableOpacity>
                 </View>
@@ -744,12 +667,8 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
                   value={assessmentTime}
                   mode="time"
                   display="spinner"
-                  onChange={(event, selectedTime) => {
-                    if (selectedTime) {
-                      setAssessmentTime(selectedTime);
-                    }
-                  }}
-                  textColor={Theme.colors.white}
+                  onChange={(_, t) => t && setAssessmentTime(t)}
+                  textColor="#000000"
                   accentColor={Theme.colors.secondary}
                 />
               </View>
@@ -764,29 +683,24 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
               mode="date"
               display="default"
               onChange={handleStartDateChange}
-              textColor={Theme.colors.white}
               accentColor={Theme.colors.secondary}
             />
           )}
-
           {showEndDatePicker && (
             <DateTimePicker
               value={endDate || new Date()}
               mode="date"
               display="default"
               onChange={handleEndDateChange}
-              textColor={Theme.colors.white}
               accentColor={Theme.colors.secondary}
             />
           )}
-
           {showTimePicker && (
             <DateTimePicker
               value={assessmentTime}
               mode="time"
               display="default"
               onChange={handleTimeChange}
-              textColor={Theme.colors.white}
               accentColor={Theme.colors.secondary}
             />
           )}
@@ -796,47 +710,42 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
   );
 };
 
-// Copy styles from CreateGroupScreen
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F1F0ED',
   },
-  
   scrollView: {
     flex: 1,
   },
-  
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Theme.layout.screenPadding,
-    paddingVertical: Theme.spacing.lg,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
   },
-  
   backButton: {
-    padding: Theme.spacing.sm,
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    padding: 8,
   },
-  
   headerTitle: {
-    ...Theme.typography.h2,
-    color: '#FF6B35',
+    fontSize: 28,
     fontWeight: '700',
     flex: 1,
     textAlign: 'center',
   },
-  
   placeholder: {
     width: 48,
   },
-  
   section: {
     paddingHorizontal: Theme.layout.screenPadding,
     paddingVertical: Theme.spacing.sm,
     marginBottom: Theme.spacing.xs,
   },
-  
   sectionTitle: {
     ...Theme.typography.h4,
     color: '#000000',
@@ -844,7 +753,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
-  
   textInput: {
     backgroundColor: '#FFFFFF',
     borderWidth: 2,
@@ -856,13 +764,87 @@ const styles = StyleSheet.create({
     minHeight: Theme.layout.inputHeight,
     textAlignVertical: 'center',
   },
-  
+  configSubtitle: {
+    ...Theme.typography.bodySmall,
+    color: '#666666',
+    marginBottom: Theme.spacing.md,
+    textAlign: 'center',
+  },
+  dateRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: Theme.spacing.sm,
+    marginBottom: Theme.spacing.md,
+  },
+  dateInput: {
+    flex: 1,
+  },
+  dateLabel: {
+    ...Theme.typography.bodySmall,
+    color: '#666666',
+    marginBottom: Theme.spacing.xs,
+    textAlign: 'center',
+  },
+  dateButton: {
+    backgroundColor: '#F5F5F5',
+    borderRadius: Theme.borderRadius.md,
+    padding: Theme.spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 50,
+  },
+  dateButtonText: {
+    ...Theme.typography.body,
+    color: '#000000',
+  },
+  progressionInput: {
+    marginBottom: Theme.spacing.md,
+  },
+  numberInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F5F5F5',
+    borderRadius: Theme.borderRadius.md,
+    padding: Theme.spacing.sm,
+  },
+  numberButton: {
+    backgroundColor: Theme.colors.secondary,
+    borderRadius: Theme.borderRadius.md,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  numberValue: {
+    ...Theme.typography.body,
+    color: '#000000',
+    fontWeight: '600',
+    minWidth: 80,
+    textAlign: 'center',
+  },
+  assessmentTimeContainer: {
+    marginTop: Theme.spacing.md,
+  },
+  timeInputButton: {
+    backgroundColor: '#F5F5F5',
+    borderRadius: Theme.borderRadius.md,
+    padding: Theme.spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 50,
+  },
+  timeInputButtonText: {
+    ...Theme.typography.body,
+    color: '#000000',
+  },
   requirementRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     marginBottom: Theme.spacing.sm,
   },
-  
   bulletPoint: {
     fontSize: 28,
     color: Theme.colors.secondary,
@@ -870,38 +852,33 @@ const styles = StyleSheet.create({
     marginTop: 0,
     fontWeight: 'bold',
   },
-  
   requirementInput: {
     flex: 1,
     backgroundColor: 'transparent',
     padding: Theme.spacing.sm,
-    color: '#000000',
+    color: '#333333',
     fontSize: 16,
     minHeight: 40,
     textAlignVertical: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: Theme.colors.border,
+    borderBottomColor: '#E5E5E5',
   },
-  
   removeButton: {
     padding: Theme.spacing.xs,
     marginLeft: Theme.spacing.sm,
   },
-  
   addRequirementButton: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: Theme.spacing.sm,
     marginTop: Theme.spacing.sm,
   },
-  
   addRequirementText: {
     ...Theme.typography.body,
     color: Theme.colors.secondary,
     marginLeft: Theme.spacing.xs,
     fontWeight: '600',
   },
-  
   modeToggleContainer: {
     flexDirection: 'row',
     marginBottom: Theme.spacing.md,
@@ -910,7 +887,6 @@ const styles = StyleSheet.create({
     padding: Theme.spacing.xs,
     gap: Theme.spacing.xs,
   },
-  
   modeToggleButton: {
     flex: 1,
     flexDirection: 'row',
@@ -922,21 +898,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     gap: Theme.spacing.xs,
   },
-  
   modeToggleButtonActive: {
     backgroundColor: Theme.colors.secondary,
   },
-  
   modeToggleText: {
     ...Theme.typography.body,
     color: Theme.colors.secondary,
     fontWeight: '600',
   },
-  
   modeToggleTextActive: {
     color: Theme.colors.white,
   },
-  
   friendItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -946,24 +918,20 @@ const styles = StyleSheet.create({
     borderRadius: Theme.borderRadius.md,
     marginBottom: Theme.spacing.sm,
   },
-  
   friendItemSelected: {
-    backgroundColor: Theme.colors.primary,
+    backgroundColor: '#FFF5F0',
     borderWidth: 2,
-    borderColor: Theme.colors.secondary,
+    borderColor: '#FF6B35',
   },
-  
   friendName: {
     ...Theme.typography.body,
     color: '#000000',
     marginLeft: Theme.spacing.md,
     flex: 1,
   },
-  
   selectionIndicator: {
     marginLeft: Theme.spacing.sm,
   },
-  
   groupItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -974,171 +942,72 @@ const styles = StyleSheet.create({
     borderRadius: Theme.borderRadius.md,
     marginBottom: Theme.spacing.sm,
   },
-  
   groupItemSelected: {
-    backgroundColor: Theme.colors.primary,
+    backgroundColor: '#FFF5F0',
     borderWidth: 2,
-    borderColor: Theme.colors.secondary,
+    borderColor: '#FF6B35',
   },
-  
   groupItemContent: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
-  
   groupItemInfo: {
     marginLeft: Theme.spacing.md,
     flex: 1,
   },
-  
   groupItemName: {
     ...Theme.typography.body,
     color: '#000000',
     fontWeight: '600',
     marginBottom: Theme.spacing.xs,
   },
-  
   groupItemDescription: {
     ...Theme.typography.bodySmall,
     color: '#666666',
     marginBottom: Theme.spacing.xs,
   },
-  
   groupItemMembers: {
     ...Theme.typography.caption,
     color: '#999999',
   },
-  
-  createButtonContainer: {
-    paddingHorizontal: Theme.layout.screenPadding,
-    paddingVertical: Theme.spacing.xl,
+  groupItemChallenges: {
+    ...Theme.typography.caption,
+    color: '#999999',
   },
-  
-  createButton: {
-    width: '100%',
-  },
-  
   noFriends: {
     alignItems: 'center',
     paddingVertical: Theme.spacing.lg,
   },
-  
   noFriendsText: {
     ...Theme.typography.body,
     color: '#666666',
     marginTop: Theme.spacing.md,
     marginBottom: Theme.spacing.xs,
   },
-  
   noFriendsSubtext: {
     ...Theme.typography.bodySmall,
     color: '#999999',
     textAlign: 'center',
   },
-  
-  configSubtitle: {
-    ...Theme.typography.bodySmall,
-    color: '#666666',
-    marginBottom: Theme.spacing.md,
-    textAlign: 'center',
+  createButtonContainer: {
+    paddingHorizontal: Theme.layout.screenPadding,
+    paddingVertical: Theme.spacing.xl,
   },
-  
-  dateRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: Theme.spacing.sm,
-    marginBottom: Theme.spacing.md,
+  createButton: {
+    width: '100%',
   },
-  
-  dateInput: {
-    flex: 1,
-  },
-  
-  dateLabel: {
-    ...Theme.typography.bodySmall,
-    color: '#666666',
-    marginBottom: Theme.spacing.xs,
-    textAlign: 'center',
-  },
-  
-  dateButton: {
-    backgroundColor: '#F5F5F5',
-    borderRadius: Theme.borderRadius.md,
-    padding: Theme.spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 50,
-  },
-  
-  dateButtonText: {
-    ...Theme.typography.body,
-    color: '#000000',
-  },
-  
-  progressionInput: {
-    marginBottom: Theme.spacing.md,
-  },
-  
-  numberInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#F5F5F5',
-    borderRadius: Theme.borderRadius.md,
-    padding: Theme.spacing.sm,
-  },
-  
-  numberButton: {
-    backgroundColor: Theme.colors.secondary,
-    borderRadius: Theme.borderRadius.md,
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  numberValue: {
-    ...Theme.typography.body,
-    color: '#000000',
-    fontWeight: '600',
-    minWidth: 80,
-    textAlign: 'center',
-  },
-  
-  assessmentTimeContainer: {
-    marginTop: Theme.spacing.md,
-  },
-  
-  timeInputButton: {
-    backgroundColor: '#F5F5F5',
-    borderRadius: Theme.borderRadius.md,
-    padding: Theme.spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 50,
-  },
-  
-  timeInputButtonText: {
-    ...Theme.typography.body,
-    color: '#000000',
-  },
-  
   pickerModalContainer: {
     flex: 1,
     justifyContent: 'flex-end',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
-  
   pickerModalContent: {
-    backgroundColor: Theme.colors.background,
+    backgroundColor: '#F1F0ED',
     borderTopLeftRadius: Theme.borderRadius.xl,
     borderTopRightRadius: Theme.borderRadius.xl,
     paddingBottom: Theme.spacing.xl,
   },
-  
   pickerModalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1146,25 +1015,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: Theme.spacing.lg,
     paddingVertical: Theme.spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: Theme.colors.border,
+    borderBottomColor: '#E5E5E5',
   },
-  
   pickerModalButton: {
     paddingVertical: Theme.spacing.sm,
     paddingHorizontal: Theme.spacing.md,
   },
-  
   pickerModalCancelText: {
     ...Theme.typography.body,
     color: '#666666',
   },
-  
   pickerModalDoneText: {
     ...Theme.typography.body,
     color: Theme.colors.secondary,
     fontWeight: '600',
   },
-  
   pickerModalTitle: {
     ...Theme.typography.h4,
     color: '#000000',

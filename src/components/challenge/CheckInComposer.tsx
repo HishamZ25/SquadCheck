@@ -1,7 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Switch, Alert, Image } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Switch, Alert, Image, ScrollView, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { useColorMode } from '../../theme/ColorModeContext';
+
+const PHOTOS_GAP = 8;
+const PHOTOS_PER_ROW = 3;
+const getPhotoSize = () => {
+  const screenWidth = Dimensions.get('window').width;
+  const horizontalPadding = 16 * 2 + 20 * 2; // screen + container padding
+  return Math.floor((screenWidth - horizontalPadding - PHOTOS_GAP * (PHOTOS_PER_ROW - 1)) / PHOTOS_PER_ROW);
+};
 
 type InputType = "boolean" | "number" | "text" | "timer";
 
@@ -14,6 +23,14 @@ interface CheckInComposerProps {
   minTextLength?: number;
   onSubmit: (draft: CheckInDraft) => void;
   disabled?: boolean;
+  showNotesField?: boolean; // Optional notes field for home screen modal
+  isModal?: boolean; // If true, remove container styling (for modal use)
+  compact?: boolean; // When true with isModal, use tighter padding for single-screen fit
+  showPhotoPicker?: boolean; // When true, show optional photo picker even when requireAttachment is false
+  /** Challenge description shown above the photo section */
+  description?: string | null;
+  /** Challenge requirements/rules shown above the photo section */
+  requirements?: string[];
 }
 
 export interface CheckInDraft {
@@ -33,19 +50,26 @@ export const CheckInComposer: React.FC<CheckInComposerProps> = ({
   minTextLength,
   onSubmit,
   disabled = false,
+  showNotesField = false,
+  isModal = false,
+  compact = false,
+  showPhotoPicker = false,
+  description,
+  requirements = [],
 }) => {
   const [boolValue, setBoolValue] = useState(false);
   const [numberValue, setNumberValue] = useState('');
   const [textValue, setTextValue] = useState('');
   const [timerValue, setTimerValue] = useState('');
   const [attachments, setAttachments] = useState<Array<{ type: "photo"|"screenshot"; uri: string }>>([]);
+  const [notes, setNotes] = useState(''); // Separate notes field
+  const { colors } = useColorMode();
 
   const isFormValid = () => {
-    // Check main input
+    // Check main input (boolean has no UI, always valid)
     switch (inputType) {
       case 'boolean':
-        if (!boolValue) return false;
-        break;
+        return true;
       case 'number':
         const numVal = parseFloat(numberValue);
         if (isNaN(numVal) || (minValue && numVal < minValue)) return false;
@@ -128,10 +152,6 @@ export const CheckInComposer: React.FC<CheckInComposerProps> = ({
     // Validate and build draft based on input type
     switch (inputType) {
       case 'boolean':
-        if (!boolValue) {
-          Alert.alert('Error', 'Please confirm completion');
-          return;
-        }
         draft.booleanValue = true;
         break;
 
@@ -193,6 +213,13 @@ export const CheckInComposer: React.FC<CheckInComposerProps> = ({
       draft.attachments = attachments;
     }
 
+    // Optional notes (when showNotesField)
+    if (showNotesField && notes.trim()) {
+      draft.textValue = (draft.textValue || '').trim()
+        ? (draft.textValue + '\n' + notes.trim())
+        : notes.trim();
+    }
+
     // Submit
     onSubmit(draft);
 
@@ -202,74 +229,90 @@ export const CheckInComposer: React.FC<CheckInComposerProps> = ({
     setTextValue('');
     setTimerValue('');
     setAttachments([]);
+    setNotes('');
   };
 
   if (disabled) {
     return null;
   }
 
+  const showRulesBox = (requireAttachment || showPhotoPicker) && (description || requirements.length > 0);
+
   return (
-    <View style={styles.container}>
-      {/* Main Input */}
-      {inputType === 'boolean' && (
-        <View style={styles.row}>
-          <Text style={styles.label}>Complete</Text>
-          <Switch
-            value={boolValue}
-            onValueChange={setBoolValue}
-            trackColor={{ false: '#E0E0E0', true: '#FF6B35' }}
-            thumbColor="#FFF"
-          />
+    <View style={isModal ? (compact ? styles.modalContainerCompact : styles.modalContainer) : [styles.container, { backgroundColor: colors.surface }]}>
+      {/* Rules & requirements - right beneath pending, extends to photo section */}
+      {showRulesBox && (
+        <View style={[styles.rulesBox, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '99' }]}>
+          <View style={styles.rulesSection}>
+            <Text style={[styles.rulesTitle, { color: colors.text }]}>Rules & requirements</Text>
+            {description ? (
+              <Text style={[styles.rulesDescription, { color: colors.textSecondary }]}>{description}</Text>
+            ) : null}
+            {requirements.length > 0 ? (
+              <View style={styles.requirementsList}>
+                {requirements.filter(Boolean).map((req, idx) => (
+                  <Text key={idx} style={[styles.requirementItem, { color: colors.textSecondary }]}>
+                    • {req}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+          </View>
         </View>
       )}
 
       {inputType === 'number' && (
-        <View style={styles.inputRow}>
+        <View style={[styles.inputRow, { backgroundColor: colors.card }]}>
           <TextInput
-            style={styles.input}
+            style={[styles.input, { color: colors.text }]}
             value={numberValue}
             onChangeText={setNumberValue}
             keyboardType="decimal-pad"
             placeholder={minValue ? `Min ${minValue}` : '0'}
-            placeholderTextColor="#999"
+            placeholderTextColor={colors.textSecondary}
           />
-          {unitLabel && <Text style={styles.unit}>{unitLabel}</Text>}
+          {unitLabel && <Text style={[styles.unit, { color: colors.textSecondary }]}>{unitLabel}</Text>}
         </View>
       )}
 
       {inputType === 'timer' && (
-        <View style={styles.inputRow}>
-          <Ionicons name="timer-outline" size={20} color="#666" />
+        <View style={[styles.inputRow, { backgroundColor: colors.card }]}>
+          <Ionicons name="timer-outline" size={20} color={colors.textSecondary} />
           <TextInput
-            style={[styles.input, { marginLeft: 8 }]}
+            style={[styles.input, { marginLeft: 8, color: colors.text }]}
             value={timerValue}
             onChangeText={setTimerValue}
             keyboardType="decimal-pad"
             placeholder={minValue ? `Min ${Math.floor(minValue / 60)} min` : '0 min'}
-            placeholderTextColor="#999"
+            placeholderTextColor={colors.textSecondary}
           />
         </View>
       )}
 
       {inputType === 'text' && (
         <TextInput
-          style={styles.textInput}
+          style={[styles.textInput, { backgroundColor: colors.card, color: colors.text }]}
           value={textValue}
           onChangeText={setTextValue}
           placeholder="Add a note..."
-          placeholderTextColor="#999"
+          placeholderTextColor={colors.textSecondary}
           multiline
         />
       )}
 
-      {/* Attachments */}
-      {requireAttachment && (
+      {/* Attachments - required or optional (showPhotoPicker) */}
+      {(requireAttachment || showPhotoPicker) && (
         <>
           {attachments.length > 0 && (
-            <View style={styles.photos}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.photosScrollContent}
+              style={styles.photosScroll}
+            >
               {attachments.map((att, idx) => (
-                <View key={idx} style={styles.photoContainer}>
-                  <Image source={{ uri: att.uri }} style={styles.photo} />
+                <View key={idx} style={[styles.photoContainer, { width: getPhotoSize(), height: getPhotoSize() }]}>
+                  <Image source={{ uri: att.uri }} style={[styles.photo, { width: getPhotoSize(), height: getPhotoSize() }]} resizeMode="cover" />
                   <TouchableOpacity 
                     style={styles.removeButton}
                     onPress={() => setAttachments(attachments.filter((_, i) => i !== idx))}
@@ -278,53 +321,97 @@ export const CheckInComposer: React.FC<CheckInComposerProps> = ({
                   </TouchableOpacity>
                 </View>
               ))}
-              <TouchableOpacity style={styles.addMore} onPress={handleAddAttachment}>
-                <Ionicons name="add" size={24} color="#666" />
+              <TouchableOpacity
+                style={[styles.addMore, { width: getPhotoSize(), height: getPhotoSize(), borderColor: colors.dividerLineTodo + '99' }]}
+                onPress={handleAddAttachment}
+              >
+                <Ionicons name="add" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           )}
 
           {attachments.length === 0 && (
-            <TouchableOpacity style={styles.photoButton} onPress={handleAddAttachment}>
-              <Ionicons name="camera" size={20} color="#FF6B35" />
-              <Text style={styles.photoButtonText}>Add Photo</Text>
+            <TouchableOpacity style={[styles.photoButton, { borderColor: colors.accent }]} onPress={handleAddAttachment}>
+              <Ionicons name="camera" size={20} color={colors.accent} />
+              <Text style={[styles.photoButtonText, { color: colors.accent }]}>Add Photo</Text>
             </TouchableOpacity>
           )}
         </>
       )}
 
-      {/* Submit */}
+      {/* Optional Notes Field */}
+      {showNotesField && inputType !== 'text' && (
+        <View style={styles.notesSection}>
+          {!compact && <Text style={[styles.notesLabel, { color: colors.textSecondary }]}>Notes (Optional)</Text>}
+          <TextInput
+            style={[styles.notesInput, { backgroundColor: colors.card, color: colors.text }, compact && styles.notesInputCompact]}
+            value={notes}
+            onChangeText={setNotes}
+            placeholder="Add a note..."
+            placeholderTextColor={colors.textSecondary}
+            multiline
+            numberOfLines={3}
+          />
+        </View>
+      )}
+
       <TouchableOpacity 
-        style={[styles.submitButton, !isFormValid() && styles.submitButtonDisabled]} 
+        style={[styles.submitButton, { backgroundColor: colors.accent }, !isFormValid() && [styles.submitButtonDisabled, { backgroundColor: colors.dividerLineTodo + '99' }]]} 
         onPress={handleSubmit}
         disabled={!isFormValid()}
       >
-        <Text style={[styles.submitText, !isFormValid() && styles.submitTextDisabled]}>Submit</Text>
+        <Text style={[styles.submitText, !isFormValid() && { color: colors.textSecondary }]}>Submit</Text>
       </TouchableOpacity>
     </View>
   );
 };
 
+const SECTION_GAP = 12;
+
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    padding: 14,
+    borderRadius: 16,
+    padding: 20,
     marginHorizontal: 16,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
+    marginTop: SECTION_GAP,
+    marginBottom: SECTION_GAP,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+    gap: SECTION_GAP,
+  },
+
+  modalContainer: {
+    backgroundColor: 'transparent',
+    padding: 24,
+    gap: 20,
+  },
+
+  modalContainerCompact: {
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    paddingVertical: 8,
     gap: 12,
+  },
+
+  notesInputCompact: {
+    minHeight: 120,
   },
 
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingVertical: 12,
+    backgroundColor: '#F9F9F9',
+    paddingHorizontal: 18,
+    borderRadius: 12,
   },
 
   label: {
-    fontSize: 15,
+    fontSize: 18,
     color: '#000',
     fontWeight: '600',
   },
@@ -333,69 +420,68 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F9F9F9',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    height: 48,
+    borderRadius: 12,
+    paddingHorizontal: 18,
+    height: 60,
   },
 
   input: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 20,
     color: '#000',
   },
 
   unit: {
-    fontSize: 14,
+    fontSize: 18,
     color: '#666',
     fontWeight: '600',
-    marginLeft: 8,
+    marginLeft: 12,
   },
 
   textInput: {
     backgroundColor: '#F9F9F9',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 15,
+    borderRadius: 12,
+    padding: 18,
+    fontSize: 18,
     color: '#000',
-    minHeight: 80,
+    minHeight: 120,
     textAlignVertical: 'top',
   },
 
-  photos: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  photosScroll: {
+    marginHorizontal: -4,
   },
-
+  photosScrollContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: PHOTOS_GAP,
+    paddingVertical: 4,
+  },
   photoContainer: {
     position: 'relative',
+    borderRadius: 12,
+    overflow: 'hidden',
   },
-
   photo: {
-    width: 80,
-    height: 80,
-    borderRadius: 8,
+    borderRadius: 12,
     backgroundColor: '#F0F0F0',
   },
 
   removeButton: {
     position: 'absolute',
-    top: 4,
-    right: 4,
+    top: 6,
+    right: 6,
     backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 10,
-    width: 20,
-    height: 20,
+    borderRadius: 12,
+    width: 24,
+    height: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   addMore: {
-    width: 80,
-    height: 80,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#E0E0E0',
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
@@ -405,25 +491,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    padding: 12,
-    borderRadius: 8,
+    gap: 12,
+    padding: 20,
+    borderRadius: 12,
     borderWidth: 2,
     borderColor: '#FF6B35',
     borderStyle: 'dashed',
   },
 
   photoButtonText: {
-    fontSize: 14,
+    fontSize: 18,
     color: '#FF6B35',
     fontWeight: '600',
   },
 
   submitButton: {
     backgroundColor: '#FF6B35',
-    padding: 14,
-    borderRadius: 8,
+    padding: 20,
+    borderRadius: 12,
     alignItems: 'center',
+    marginTop: 8,
   },
 
   submitButtonDisabled: {
@@ -431,12 +518,57 @@ const styles = StyleSheet.create({
   },
 
   submitText: {
-    fontSize: 16,
+    fontSize: 20,
     fontWeight: '700',
     color: '#FFF',
   },
 
   submitTextDisabled: {
     color: '#888',
+  },
+
+  rulesBox: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    minHeight: 88,
+  },
+  rulesSection: {
+    gap: 6,
+  },
+  rulesTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  rulesDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  requirementsList: {
+    gap: 2,
+  },
+  requirementItem: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  notesSection: {
+    gap: 10,
+  },
+
+  notesLabel: {
+    fontSize: 18,
+    color: '#666',
+    fontWeight: '600',
+  },
+
+  notesInput: {
+    backgroundColor: '#F9F9F9',
+    borderRadius: 12,
+    padding: 18,
+    fontSize: 18,
+    color: '#000',
+    minHeight: 120,
+    textAlignVertical: 'top',
   },
 });

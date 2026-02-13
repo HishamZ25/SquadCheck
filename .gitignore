@@ -93,6 +93,7 @@ yarn-error.*
 *.tsbuildinfo
 
 # Firebase
+functions/lib/
 google-services.json
 GoogleService-Info.plist
 firebase-debug.log

@@ -2,12 +2,15 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Theme } from '../../constants/theme';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 type ChallengeType = "standard" | "progress" | "elimination" | "deadline";
 type CadenceUnit = "daily" | "weekly";
 
 interface ChallengeHeaderProps {
   title: string;
+  /** When provided (e.g. "Check In"), shown as main title; challengeName shown below */
+  challengeName?: string;
   groupName: string;
   groupId: string;
   cadence: {
@@ -21,6 +24,7 @@ interface ChallengeHeaderProps {
 
 export const ChallengeHeader: React.FC<ChallengeHeaderProps> = ({
   title,
+  challengeName,
   groupName,
   groupId,
   cadence,
@@ -28,6 +32,7 @@ export const ChallengeHeader: React.FC<ChallengeHeaderProps> = ({
   onBack,
   navigation,
 }) => {
+  const { colors } = useColorMode();
   const getCadenceText = () => {
     if (cadence.unit === 'daily') {
       return 'Daily';
@@ -51,27 +56,37 @@ export const ChallengeHeader: React.FC<ChallengeHeaderProps> = ({
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.headerRow}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#000" />
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={styles.titleContainer}>
           <Text 
-            style={styles.title} 
+            style={[styles.title, { color: colors.accent }]} 
             numberOfLines={1} 
             adjustsFontSizeToFit 
             minimumFontScale={0.7}
           >
             {title}
           </Text>
+          {challengeName ? (
+            <Text 
+              style={[styles.challengeNameSubtitle, { color: colors.textSecondary }]} 
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
+            >
+              {challengeName}
+            </Text>
+          ) : null}
           <TouchableOpacity 
             onPress={() => navigation && groupId && navigation.navigate('GroupChat', { groupId })}
             disabled={!navigation || !groupId}
             activeOpacity={0.7}
           >
             <Text 
-              style={styles.metaText} 
+              style={[styles.metaText, { color: colors.textSecondary }]} 
               numberOfLines={1}
               adjustsFontSizeToFit
               minimumFontScale={0.7}
@@ -88,7 +103,6 @@ export const ChallengeHeader: React.FC<ChallengeHeaderProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#F1F0ED',
     paddingHorizontal: Theme.layout.screenPadding,
     paddingTop: 16,
     paddingBottom: 12,
@@ -114,15 +128,18 @@ const styles = StyleSheet.create({
 
   title: {
     ...Theme.typography.h2,
-    color: '#FF6B35',
     fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  challengeNameSubtitle: {
+    fontSize: 15,
+    fontWeight: '500',
     textAlign: 'center',
     marginBottom: 4,
   },
-
   metaText: {
     fontSize: 13,
-    color: '#666',
     fontWeight: '500',
     textAlign: 'center',
     paddingHorizontal: 10,

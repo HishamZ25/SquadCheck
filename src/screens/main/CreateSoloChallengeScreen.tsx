@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Theme } from '../../constants/theme';
 import { Button } from '../../components/common/Button';
+import { Input } from '../../components/common/Input';
 import { GroupService } from '../../services/groupService';
 import { auth } from '../../services/firebase';
 
@@ -219,11 +220,8 @@ export const CreateSoloChallengeScreen: React.FC<CreateSoloChallengeScreenProps>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={22} color="#000000" />
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={22} color="#000" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Create Solo Challenge</Text>
           <View style={styles.placeholder} />
@@ -231,29 +229,25 @@ export const CreateSoloChallengeScreen: React.FC<CreateSoloChallengeScreenProps>
 
         {/* Challenge Title Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Challenge Title</Text>
-          <TextInput
-            style={styles.textInput}
+          <Input
+            label="Challenge Title"
             placeholder="What is This Challenge's Title?"
-            placeholderTextColor={Theme.colors.textTertiary}
             value={challengeTitle}
             onChangeText={setChallengeTitle}
             multiline
-            textAlign="center"
+            variant="light"
           />
         </View>
 
         {/* Goal Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Goal</Text>
-          <TextInput
-            style={styles.textInput}
+          <Input
+            label="Goal"
             placeholder="What is your goal for this challenge?"
-            placeholderTextColor={Theme.colors.textTertiary}
             value={goal}
             onChangeText={setGoal}
             multiline
-            textAlign="center"
+            variant="light"
           />
         </View>
 
@@ -268,14 +262,12 @@ export const CreateSoloChallengeScreen: React.FC<CreateSoloChallengeScreenProps>
               <Text style={styles.configSubtitle}>
                 Define what happens when you miss a requirement
               </Text>
-              <TextInput
-                style={styles.textInput}
+              <Input
                 placeholder="Enter elimination rule..."
-                placeholderTextColor={Theme.colors.textTertiary}
                 value={eliminationRule}
                 onChangeText={setEliminationRule}
                 multiline
-                textAlign="center"
+                variant="light"
               />
             </View>
           )}
@@ -342,14 +334,12 @@ export const CreateSoloChallengeScreen: React.FC<CreateSoloChallengeScreenProps>
                 <Text style={styles.configSubtitle}>
                   What needs to increase? Cardio done? Time spent coding?
                 </Text>
-                <TextInput
-                  style={styles.textInput}
+                <Input
                   placeholder="Enter interval type..."
-                  placeholderTextColor={Theme.colors.textTertiary}
                   value={intervalType}
                   onChangeText={setIntervalType}
                   multiline
-                  textAlign="center"
+                  variant="light"
                 />
               </View>
             </View>
@@ -381,14 +371,13 @@ export const CreateSoloChallengeScreen: React.FC<CreateSoloChallengeScreenProps>
           {requirements.map((requirement, index) => (
             <View key={index} style={styles.requirementRow}>
               <Text style={styles.bulletPoint}>*</Text>
-              <TextInput
-                style={styles.requirementInput}
+              <Input
                 placeholder="Enter requirement or rule..."
-                placeholderTextColor={Theme.colors.textTertiary}
                 value={requirement}
                 onChangeText={(text) => updateRequirement(index, text)}
                 multiline
-                textAlign="center"
+                variant="light"
+                containerStyle={{ flex: 1 }}
               />
               {requirements.length > 1 && (
                 <TouchableOpacity
@@ -497,7 +486,7 @@ export const CreateSoloChallengeScreen: React.FC<CreateSoloChallengeScreenProps>
           <Button
             title="Create Solo Challenge"
             onPress={handleCreateChallenge}
-            variant="primary"
+            variant="secondary"
             style={styles.createButton}
           />
         </View>
@@ -693,21 +682,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Theme.layout.screenPadding,
-    paddingVertical: Theme.spacing.lg,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+    backgroundColor: '#F1F0ED',
   },
   backButton: {
-    padding: Theme.spacing.sm,
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    padding: 8,
   },
   headerTitle: {
-    ...Theme.typography.h2,
-    color: '#FF6B35',
+    fontSize: 28,
     fontWeight: '700',
+    color: '#000',
     flex: 1,
     textAlign: 'center',
   },
   placeholder: {
-    width: 40,
+    width: 48,
   },
   section: {
     marginBottom: Theme.spacing.xl,
@@ -818,8 +813,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F5',
     borderRadius: Theme.borderRadius.md,
     padding: Theme.spacing.md,
-    color: '#000000',
     ...Theme.typography.body,
+    color: '#000000',
     minHeight: 50,
   },
   removeButton: {

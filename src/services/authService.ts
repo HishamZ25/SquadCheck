@@ -3,6 +3,7 @@ import {
   signInWithEmailAndPassword, 
   signOut, 
   updateProfile,
+  sendEmailVerification as firebaseSendEmailVerification,
   User as FirebaseUser 
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
@@ -91,6 +92,10 @@ export class AuthService {
       // If document exists, return it
       if (userDoc?.exists()) {
         const userData = userDoc.data() as User;
+        // CRITICAL: Ensure id is always set
+        if (!userData.id) {
+          userData.id = user.uid;
+        }
         // Ensure displayName is set from Firebase Auth if missing in Firestore
         if (!userData.displayName && user.displayName) {
           userData.displayName = user.displayName;
@@ -185,6 +190,36 @@ export class AuthService {
       });
     } catch (error) {
       console.error('Error updating last active:', error);
+    }
+  }
+
+  // Send email verification
+  static async sendEmailVerification(): Promise<void> {
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error('No user logged in');
+      if (user.emailVerified) {
+        console.log('Email already verified');
+        return;
+      }
+      await firebaseSendEmailVerification(user);
+      console.log('Verification email sent to:', user.email);
+    } catch (error) {
+      console.error('Error sending verification email:', error);
+      throw error;
+    }
+  }
+
+  // Check if email is verified (reloads user from server)
+  static async checkEmailVerification(): Promise<boolean> {
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error('No user logged in');
+      await user.reload();
+      return user.emailVerified;
+    } catch (error) {
+      console.error('Error checking email verification:', error);
+      throw error;
     }
   }
 } 

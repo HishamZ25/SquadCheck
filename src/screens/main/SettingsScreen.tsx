@@ -14,6 +14,7 @@ import { Theme } from '../../constants/theme';
 import { AuthService } from '../../services/authService';
 import { User } from '../../types';
 import { Ionicons } from '@expo/vector-icons';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 interface SettingsScreenProps {
   navigation: any;
@@ -22,6 +23,7 @@ interface SettingsScreenProps {
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, route }) => {
   const user: User = route.params?.user;
+  const { colors } = useColorMode();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const handleLogout = async () => {
@@ -72,74 +74,49 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.header, { backgroundColor: colors.background }]}>
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={22} color="#000000" />
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Settings</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Settings</Text>
         <View style={styles.headerSpacer} />
       </View>
 
-      {/* User Profile Section */}
       <View style={styles.userSection}>
         <Avatar
           source={user?.photoURL}
           initials={user?.displayName?.charAt(0)}
           size="xl"
         />
-        <Text style={styles.userName}>{user?.displayName || 'User'}</Text>
-        <Text style={styles.userTitle}>{user?.title || 'Accountability Seeker'}</Text>
-        <Text style={styles.userEmail}>{user?.email}</Text>
-        
-        {/* Stats Row */}
-        <View style={styles.statsRow}>
-          {/* Badges */}
-          <View style={styles.badgesContainer}>
-            <Ionicons name="star" size={20} color={Theme.colors.gold} />
-            <Ionicons name="trophy" size={20} color={Theme.colors.gold} />
-            <Ionicons name="medal" size={20} color={Theme.colors.gold} />
-          </View>
-          
-          {/* Streak */}
-          <View style={styles.streakContainer}>
-            <Ionicons name="flame" size={20} color={Theme.colors.streak} />
-            <Text style={styles.streakText}>7</Text>
-          </View>
-          
-          {/* Points */}
-          <View style={styles.pointsContainer}>
-            <Ionicons name="diamond" size={20} color={Theme.colors.points} />
-            <Text style={styles.pointsText}>1250</Text>
-          </View>
-        </View>
+        <Text style={[styles.userName, { color: colors.text }]}>{user?.displayName || 'User'}</Text>
+        <Text style={[styles.userTitle, { color: colors.textSecondary }]}>{user?.title || 'Accountability Seeker'}</Text>
+        <Text style={[styles.userEmail, { color: colors.textSecondary }]}>{user?.email}</Text>
       </View>
 
-      {/* Settings Options */}
-      <View style={styles.settingsSection}>
-        <TouchableOpacity style={styles.settingItem}>
-          <Ionicons name="person-outline" size={24} color="#666666" />
-          <Text style={styles.settingText}>Edit Profile</Text>
-          <Ionicons name="chevron-forward" size={20} color="#999999" />
+      <View style={[styles.settingsSection, { backgroundColor: colors.card }]}>
+        <TouchableOpacity style={[styles.settingItem, { backgroundColor: colors.card, borderWidth: 2, borderColor: colors.accent, borderBottomColor: colors.dividerLineTodo + '40' }]}>
+          <Text style={[styles.settingText, { color: colors.text }]}>Edit Profile</Text>
+          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.settingItem}>
-          <Ionicons name="notifications-outline" size={24} color="#666666" />
-          <Text style={styles.settingText}>Notifications</Text>
-          <Ionicons name="chevron-forward" size={20} color="#999999" />
+        <TouchableOpacity style={[styles.settingItem, { backgroundColor: colors.card, borderWidth: 2, borderColor: colors.accent, borderBottomColor: colors.dividerLineTodo + '40' }]}>
+          <Text style={[styles.settingText, { color: colors.text }]}>Notifications</Text>
+          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.settingItem}>
-          <Ionicons name="shield-outline" size={24} color="#666666" />
-          <Text style={styles.settingText}>Privacy</Text>
-          <Ionicons name="chevron-forward" size={20} color="#999999" />
+        <TouchableOpacity style={[styles.settingItem, { backgroundColor: colors.card, borderWidth: 2, borderColor: colors.accent, borderBottomColor: colors.dividerLineTodo + '40' }]}>
+          <Text style={[styles.settingText, { color: colors.text }]}>Privacy</Text>
+          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.settingItem}>
-          <Ionicons name="help-circle-outline" size={24} color="#666666" />
-          <Text style={styles.settingText}>Help & Support</Text>
-          <Ionicons name="chevron-forward" size={20} color="#999999" />
+        <TouchableOpacity 
+          style={[styles.settingItem, { backgroundColor: colors.card, borderWidth: 2, borderColor: colors.accent, borderBottomColor: colors.dividerLineTodo + '40' }]}
+          onPress={() => navigation.navigate('Onboarding', { fromSettings: true })}
+        >
+          <Text style={[styles.settingText, { color: colors.text }]}>View Tutorial</Text>
+          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.settingItem, { backgroundColor: colors.card, borderWidth: 2, borderColor: colors.accent, borderBottomColor: colors.dividerLineTodo + '40' }]}>
+          <Text style={[styles.settingText, { color: colors.text }]}>Help & Support</Text>
+          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>
 
@@ -170,29 +147,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: Theme.layout.screenPadding,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+    backgroundColor: '#F1F0ED',
   },
-  
   backButton: {
-    padding: Theme.spacing.sm,
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    padding: 8,
   },
-  
   headerTitle: {
-    ...Theme.typography.h2,
-    color: '#FF6B35',
+    fontSize: 28,
     fontWeight: '700',
+    color: '#000',
     flex: 1,
     textAlign: 'center',
   },
-  
   headerSpacer: {
-    width: 48, // Same width as back button for centering
+    width: 48,
   },
-  
   userSection: {
     alignItems: 'center',
-    padding: Theme.layout.screenPadding,
-    paddingTop: Theme.spacing.xl,
+    paddingHorizontal: 20,
+    paddingTop: 16,
   },
   
   userName: {
@@ -212,62 +192,24 @@ const styles = StyleSheet.create({
   
   userEmail: {
     ...Theme.typography.bodySmall,
-    marginBottom: Theme.spacing.lg,
+    marginBottom: Theme.spacing.md,
     textAlign: 'center',
     color: '#999999',
   },
-  
-  statsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-    paddingHorizontal: Theme.spacing.xl,
-  },
-  
-  badgesContainer: {
-    flexDirection: 'row',
-    gap: Theme.spacing.sm,
-  },
-  
-  streakContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Theme.spacing.xs,
-  },
-  
-  streakText: {
-    ...Theme.typography.h4,
-    color: Theme.colors.streak,
-    fontWeight: '600',
-  },
-  
-  pointsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Theme.spacing.xs,
-  },
-  
-  pointsText: {
-    ...Theme.typography.h4,
-    color: Theme.colors.points,
-    fontWeight: '600',
-  },
-  
   settingsSection: {
     flex: 1,
-    paddingHorizontal: Theme.layout.screenPadding,
-    marginTop: Theme.spacing.xl,
+    paddingHorizontal: 20,
+    marginTop: Theme.spacing.lg,
   },
   
   settingItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F5F5F5',
     borderRadius: Theme.borderRadius.md,
     padding: Theme.spacing.md,
     marginBottom: Theme.spacing.sm,
     gap: Theme.spacing.md,
+    borderWidth: 2,
   },
   
   settingText: {

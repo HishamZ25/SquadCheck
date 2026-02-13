@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
+import { View, StyleSheet, Text } from 'react-native';
+import { CircleLoader } from './CircleLoader';
 
 interface LoadingSpinnerProps {
   size?: 'small' | 'large';
@@ -7,14 +8,14 @@ interface LoadingSpinnerProps {
   text?: string;
 }
 
-export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ 
+export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
   size = 'large',
   color = '#FF6B35',
-  text 
+  text,
 }) => {
   return (
     <View style={styles.container}>
-      <ActivityIndicator size={size} color={color} />
+      <CircleLoader size={size} dotColor={color} />
       {text && <Text style={styles.text}>{text}</Text>}
     </View>
   );

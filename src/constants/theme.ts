@@ -1,9 +1,52 @@
-import { Colors } from './colors';
+/** Single source for theme: colors, spacing, typography, layout, animation */
+const colors = {
+  primary: '#374151',
+  primaryLight: '#4B5563',
+  primaryDark: '#1F2937',
+  secondary: '#FF6B35',
+  secondaryLight: '#FF8A65',
+  secondaryDark: '#E55A2B',
+  accent: '#FF8C42',
+  accentLight: '#FFA726',
+  accentDark: '#F57C00',
+  success: '#4CAF50',
+  error: '#F44336',
+  warning: '#FF9800',
+  info: '#2196F3',
+  white: '#FFFFFF',
+  black: '#000000',
+  gray50: '#F9FAFB',
+  gray100: '#F3F4F6',
+  gray200: '#E5E7EB',
+  gray300: '#D1D5DB',
+  gray400: '#9CA3AF',
+  gray500: '#6B7280',
+  gray600: '#4B5563',
+  gray700: '#374151',
+  gray800: '#1F2937',
+  gray900: '#111827',
+  background: '#1F2937',
+  surface: '#374151',
+  card: '#4B5563',
+  text: '#FFFFFF',
+  textSecondary: '#E6E6E6',
+  textTertiary: '#B3B3B3',
+  border: '#404040',
+  borderLight: '#2D2D2D',
+  shadow: 'rgba(0, 0, 0, 0.3)',
+  shadowLight: 'rgba(0, 0, 0, 0.2)',
+  pending: '#FF9800',
+  approved: '#4CAF50',
+  rejected: '#F44336',
+  aiVerified: '#9C27B0',
+  gold: '#FFD700',
+  streak: '#FF6B35',
+  points: '#FF8C42',
+} as const;
 
 export const Theme = {
-  colors: Colors,
-  
-  // Spacing
+  colors,
+
   spacing: {
     xs: 4,
     sm: 8,
@@ -12,8 +55,7 @@ export const Theme = {
     xl: 32,
     xxl: 48,
   },
-  
-  // Border radius
+
   borderRadius: {
     sm: 4,
     md: 8,
@@ -21,110 +63,54 @@ export const Theme = {
     xl: 16,
     full: 9999,
   },
-  
-  // Shadows
+
   shadows: {
     sm: {
-      shadowColor: Colors.shadow,
+      shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 1 },
       shadowOpacity: 0.05,
       shadowRadius: 2,
       elevation: 1,
     },
     md: {
-      shadowColor: Colors.shadow,
+      shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 2 },
       shadowOpacity: 0.1,
       shadowRadius: 4,
       elevation: 3,
     },
     lg: {
-      shadowColor: Colors.shadow,
+      shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.15,
       shadowRadius: 8,
       elevation: 6,
     },
   },
-  
-  // Typography
+
   typography: {
-    h1: {
-      fontSize: 32,
-      fontWeight: 'bold',
-      lineHeight: 40,
-      color: Colors.text,
-    },
-    h2: {
-      fontSize: 24,
-      fontWeight: 'bold',
-      lineHeight: 32,
-      color: Colors.text,
-    },
-    h3: {
-      fontSize: 20,
-      fontWeight: '600',
-      lineHeight: 28,
-      color: Colors.text,
-    },
-    h4: {
-      fontSize: 18,
-      fontWeight: '600',
-      lineHeight: 24,
-      color: Colors.text,
-    },
-    body: {
-      fontSize: 16,
-      fontWeight: 'normal',
-      lineHeight: 24,
-      color: Colors.text,
-    },
-    bodySmall: {
-      fontSize: 14,
-      fontWeight: 'normal',
-      lineHeight: 20,
-      color: Colors.textSecondary,
-    },
-    caption: {
-      fontSize: 12,
-      fontWeight: 'normal',
-      lineHeight: 16,
-      color: Colors.textTertiary,
-    },
-    button: {
-      fontSize: 16,
-      fontWeight: '600',
-      lineHeight: 24,
-      color: Colors.white,
-    },
+    h1: { fontSize: 32, fontWeight: '700', lineHeight: 40, color: colors.text },
+    h2: { fontSize: 24, fontWeight: '700', lineHeight: 32, color: colors.text },
+    h3: { fontSize: 20, fontWeight: '600', lineHeight: 28, color: colors.text },
+    h4: { fontSize: 18, fontWeight: '600', lineHeight: 24, color: colors.text },
+    body: { fontSize: 16, fontWeight: '400', lineHeight: 24, color: colors.text },
+    bodySmall: { fontSize: 14, fontWeight: '400', lineHeight: 20, color: colors.textSecondary },
+    caption: { fontSize: 12, fontWeight: '400', lineHeight: 16, color: colors.textTertiary },
+    button: { fontSize: 16, fontWeight: '600', lineHeight: 24, color: colors.white },
   },
-  
-  // Layout
+
   layout: {
     screenPadding: 16,
     cardPadding: 16,
     buttonHeight: 48,
     inputHeight: 48,
-    avatarSize: {
-      sm: 32,
-      md: 48,
-      lg: 64,
-      xl: 96,
-    },
+    fabBottomOffsetHome: 78,
+    fabBottomOffsetSocial: 50,
+    avatarSize: { sm: 32, md: 48, lg: 64, xl: 96 },
   },
-  
-  // Animation
+
   animation: {
-    duration: {
-      fast: 200,
-      normal: 300,
-      slow: 500,
-    },
-    easing: {
-      ease: 'ease',
-      easeIn: 'ease-in',
-      easeOut: 'ease-out',
-      easeInOut: 'ease-in-out',
-    },
+    duration: { fast: 200, normal: 300, slow: 500 },
+    easing: { ease: 'ease', easeIn: 'ease-in', easeOut: 'ease-out', easeInOut: 'ease-in-out' },
   },
-} as const; 
+} as const;

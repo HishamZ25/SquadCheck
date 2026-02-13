@@ -4,69 +4,51 @@ import {
   getDocs, 
   query, 
   where, 
-  getDoc 
+  getDoc,
+  addDoc,
+  updateDoc,
+  serverTimestamp,
+  deleteDoc
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Friendship, User } from '../types';
 import { AuthService } from './authService';
 
 export class FriendshipService {
-  // Get all friends for a user
+  // Get all friends for a user (fetches friend user docs in parallel)
   static async getUserFriends(userId: string): Promise<User[]> {
     try {
-      console.log('🔍 Getting friends for user:', userId);
-      
-      // Query friendships where user is either user1 or user2 and status is accepted
       const friendshipsQuery = query(
         collection(db, 'friendships'),
         where('status', '==', 'accepted')
       );
 
       const querySnapshot = await getDocs(friendshipsQuery);
-      console.log('📊 Found friendships:', querySnapshot.docs.length);
-      
       const friendIds: string[] = [];
 
-      querySnapshot.docs.forEach((doc, index) => {
-        const friendship = doc.data() as Friendship;
-        console.log(`👥 Friendship ${index + 1} data:`, friendship);
-        
-        // Trim user IDs to remove any whitespace/newlines
+      querySnapshot.docs.forEach((d) => {
+        const friendship = d.data() as Friendship;
         const trimmedUserId1 = friendship.userId1?.trim();
         const trimmedUserId2 = friendship.userId2?.trim();
-        
-        console.log(`🔍 Checking if ${userId} matches userId1: "${trimmedUserId1}" or userId2: "${trimmedUserId2}"`);
-        
-        if (trimmedUserId1 === userId) {
-          friendIds.push(trimmedUserId2);
-          console.log('➕ Added friend from userId1 position:', trimmedUserId2);
-        } else if (trimmedUserId2 === userId) {
-          friendIds.push(trimmedUserId1);
-          console.log('➕ Added friend from userId2 position:', trimmedUserId1);
-        } else {
-          console.log('❌ No match found for this friendship');
-        }
+        if (trimmedUserId1 === userId && trimmedUserId2) friendIds.push(trimmedUserId2);
+        else if (trimmedUserId2 === userId && trimmedUserId1) friendIds.push(trimmedUserId1);
       });
 
-      console.log('🎯 Total friend IDs found:', friendIds.length);
+      if (friendIds.length === 0) return [];
 
-      // Get user details for each friend ID
-      const friends: User[] = [];
-      for (const friendId of friendIds) {
-        try {
-          const userDoc = await getDoc(doc(db, 'users', friendId));
-          if (userDoc.exists()) {
-            const userData = userDoc.data() as User;
-            friends.push(userData);
-            console.log('✅ Loaded friend:', userData.displayName);
-          }
-        } catch (error) {
-          console.error('Error getting friend user data:', error);
-        }
-      }
+      // Fetch all friend user documents in parallel (one failure doesn't break the rest)
+      const userPromises = friendIds.map((friendId) =>
+        getDoc(doc(db, 'users', friendId))
+          .then((userDoc) => {
+            if (!userDoc.exists()) return null;
+            const data = userDoc.data();
+            return { id: userDoc.id, ...data } as User;
+          })
+          .catch(() => null)
+      );
 
-      console.log('🎉 Final friends list:', friends.map(f => f.displayName));
-      return friends;
+      const results = await Promise.all(userPromises);
+      return results.filter((u): u is User => u != null);
     } catch (error) {
       console.error('Error getting user friends:', error);
       return [];
@@ -126,6 +108,146 @@ export class FriendshipService {
     } catch (error) {
       console.error('Error getting friend count:', error);
       return 0;
+    }
+  }
+
+  // Search for a user by username or user ID
+  static async searchUser(searchQuery: string): Promise<User | null> {
+    try {
+      // First try to find by exact user ID
+      const userDoc = await getDoc(doc(db, 'users', searchQuery));
+      if (userDoc.exists()) {
+        return { id: userDoc.id, ...userDoc.data() } as User;
+      }
+
+      // Then try to find by username (case-insensitive)
+      const usersQuery = query(
+        collection(db, 'users')
+      );
+      const querySnapshot = await getDocs(usersQuery);
+      
+      for (const docSnapshot of querySnapshot.docs) {
+        const userData = docSnapshot.data();
+        if (userData.displayName?.toLowerCase() === searchQuery.toLowerCase()) {
+          return { id: docSnapshot.id, ...userData } as User;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error searching for user:', error);
+      throw new Error('Failed to search for user');
+    }
+  }
+
+  // Send a friend request
+  static async sendFriendRequest(fromUserId: string, toUserId: string): Promise<void> {
+    try {
+      // Check if already friends
+      const areFriends = await this.areUsersFriends(fromUserId, toUserId);
+      if (areFriends) {
+        throw new Error('You are already friends with this user');
+      }
+
+      // Check if there's already a pending request
+      const existingRequests = query(
+        collection(db, 'friendRequests'),
+        where('fromUserId', '==', fromUserId),
+        where('toUserId', '==', toUserId),
+        where('status', '==', 'pending')
+      );
+      const existingSnapshot = await getDocs(existingRequests);
+      if (!existingSnapshot.empty) {
+        throw new Error('Friend request already sent');
+      }
+
+      // Check if there's a reverse pending request (they sent you one)
+      const reverseRequests = query(
+        collection(db, 'friendRequests'),
+        where('fromUserId', '==', toUserId),
+        where('toUserId', '==', fromUserId),
+        where('status', '==', 'pending')
+      );
+      const reverseSnapshot = await getDocs(reverseRequests);
+      if (!reverseSnapshot.empty) {
+        throw new Error('This user has already sent you a friend request. Check your notifications!');
+      }
+
+      // Get sender's info
+      const fromUserDoc = await getDoc(doc(db, 'users', fromUserId));
+      if (!fromUserDoc.exists()) {
+        throw new Error('User not found');
+      }
+      const fromUserData = fromUserDoc.data();
+
+      // Create friend request
+      await addDoc(collection(db, 'friendRequests'), {
+        fromUserId,
+        fromUserName: fromUserData.displayName || 'Unknown',
+        fromUserPhoto: fromUserData.photoURL || '',
+        toUserId,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+      });
+    } catch (error: any) {
+      console.error('Error sending friend request:', error);
+      throw error;
+    }
+  }
+
+  // Get pending friend requests for a user
+  static async getPendingRequests(userId: string): Promise<any[]> {
+    try {
+      const requestsQuery = query(
+        collection(db, 'friendRequests'),
+        where('toUserId', '==', userId),
+        where('status', '==', 'pending')
+      );
+
+      const querySnapshot = await getDocs(requestsQuery);
+      return querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+    } catch (error) {
+      console.error('Error getting pending requests:', error);
+      return [];
+    }
+  }
+
+  // Accept a friend request
+  static async acceptFriendRequest(requestId: string, userId: string, fromUserId: string): Promise<void> {
+    try {
+      // Update request status
+      await updateDoc(doc(db, 'friendRequests', requestId), {
+        status: 'accepted',
+        acceptedAt: serverTimestamp(),
+      });
+
+      // Create friendship
+      await addDoc(collection(db, 'friendships'), {
+        userId1: fromUserId,
+        userId2: userId,
+        status: 'accepted',
+        createdAt: serverTimestamp(),
+      });
+
+      // Delete the request (clean up)
+      await deleteDoc(doc(db, 'friendRequests', requestId));
+    } catch (error) {
+      console.error('Error accepting friend request:', error);
+      throw new Error('Failed to accept friend request');
+    }
+  }
+
+  // Decline a friend request
+  static async declineFriendRequest(requestId: string): Promise<void> {
+    try {
+      // Just delete the request
+      await deleteDoc(doc(db, 'friendRequests', requestId));
+    } catch (error) {
+      console.error('Error declining friend request:', error);
+      throw new Error('Failed to decline friend request');
     }
   }
 } 

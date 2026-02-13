@@ -18,6 +18,9 @@ import {
 } from 'firebase/storage';
 import { db, storage } from './firebase';
 
+const SYSTEM_USER_ID = 'system-missed';
+const SYSTEM_USER_NAME = 'SquadCheck';
+
 // Define the chat message interface for group chats
 export interface GroupChatMessage {
   id: string;
@@ -25,10 +28,12 @@ export interface GroupChatMessage {
   userId: string;
   userName: string;
   timestamp: Date;
-  type: 'text' | 'image' | 'checkin';
+  type: 'text' | 'image' | 'checkin' | 'elimination' | 'winner';
   imageUrl?: string;
   caption?: string;
   challengeTitle?: string;
+  /** For elimination/winner messages: challenge name shown in orange */
+  challengeName?: string;
   upvotes?: number;
   downvotes?: number;
 }
@@ -55,6 +60,56 @@ export class MessageService {
       return docRef.id;
     } catch (error) {
       console.error('Error sending text message:', error);
+      throw error;
+    }
+  }
+
+  /** Send elimination message: "[Name] has missed the check in for challenge: [Challenge]. They've been eliminated." (challengeName in orange in UI) */
+  static async sendEliminationMessage(
+    groupId: string,
+    displayName: string,
+    challengeName: string
+  ): Promise<string> {
+    try {
+      const text = `${displayName} has missed the check in for challenge: ${challengeName}. They've been eliminated.`;
+      const messageData = {
+        groupId,
+        userId: SYSTEM_USER_ID,
+        userName: SYSTEM_USER_NAME,
+        text,
+        type: 'elimination' as const,
+        challengeName,
+        timestamp: serverTimestamp(),
+      };
+      const docRef = await addDoc(collection(db, 'messages'), messageData);
+      return docRef.id;
+    } catch (error) {
+      console.error('Error sending elimination message:', error);
+      throw error;
+    }
+  }
+
+  /** Send winner message when last member remains in elimination: "[Name] was the last remaining member of [Challenge]. They win!" */
+  static async sendWinnerMessage(
+    groupId: string,
+    winnerName: string,
+    challengeName: string
+  ): Promise<string> {
+    try {
+      const text = `${winnerName} was the last remaining member of ${challengeName}. They win!`;
+      const messageData = {
+        groupId,
+        userId: SYSTEM_USER_ID,
+        userName: SYSTEM_USER_NAME,
+        text,
+        type: 'winner' as const,
+        challengeName,
+        timestamp: serverTimestamp(),
+      };
+      const docRef = await addDoc(collection(db, 'messages'), messageData);
+      return docRef.id;
+    } catch (error) {
+      console.error('Error sending winner message:', error);
       throw error;
     }
   }
@@ -112,16 +167,18 @@ export class MessageService {
       const querySnapshot = await getDocs(messagesQuery);
       return querySnapshot.docs.map(doc => {
         const data = doc.data();
+        const type = data.type || (data.challengeTitle ? 'checkin' : 'text');
         return {
           id: doc.id,
           text: data.text || '',
           userId: data.userId,
           userName: data.userName,
           timestamp: data.timestamp?.toDate() || new Date(),
-          type: data.type,
+          type,
           imageUrl: data.imageUrl,
           caption: data.caption,
           challengeTitle: data.challengeTitle,
+          challengeName: data.challengeName,
           upvotes: data.upvotes || 0,
           downvotes: data.downvotes || 0,
         } as GroupChatMessage;
@@ -150,16 +207,18 @@ export class MessageService {
       (querySnapshot) => {
         const messages = querySnapshot.docs.map(doc => {
           const data = doc.data();
+          const type = data.type || (data.challengeTitle ? 'checkin' : 'text');
           return {
             id: doc.id,
             text: data.text || '',
             userId: data.userId,
             userName: data.userName,
             timestamp: data.timestamp?.toDate() || new Date(),
-            type: data.type,
+            type,
             imageUrl: data.imageUrl,
             caption: data.caption,
             challengeTitle: data.challengeTitle,
+            challengeName: data.challengeName,
             upvotes: data.upvotes || 0,
             downvotes: data.downvotes || 0,
           } as GroupChatMessage;
@@ -167,8 +226,9 @@ export class MessageService {
         callback(messages);
       },
       (error) => {
-        console.error('Error in messages snapshot listener:', error);
-        // Return empty array on error
+        if (__DEV__) {
+          console.warn('Firestore Listen (messages) transport error, will retry:', error?.code || error?.message);
+        }
         callback([]);
       }
     );
@@ -233,6 +293,15 @@ export class MessageService {
     challengeTitle?: string
   ): Promise<string> {
     try {
+      console.log('📤 sendCheckInMessage called with:', {
+        groupId,
+        userId,
+        userName,
+        caption,
+        imageUrl: imageUrl ? `${imageUrl.substring(0, 50)}...` : null,
+        challengeTitle
+      });
+      
       const messageData = {
         groupId,
         userId,
@@ -247,10 +316,12 @@ export class MessageService {
         timestamp: serverTimestamp(),
       };
 
+      console.log('📝 Creating message document in Firestore...');
       const docRef = await addDoc(collection(db, 'messages'), messageData);
+      console.log('✅ Check-in message created with ID:', docRef.id);
       return docRef.id;
     } catch (error) {
-      console.error('Error sending check-in message:', error);
+      console.error('❌ Error sending check-in message:', error);
       throw error;
     }
   }

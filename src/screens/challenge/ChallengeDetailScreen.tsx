@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, SafeAreaView, Alert } from 'react-native';
+import { CircleLoader } from '../../components/common/CircleLoader';
 import { ChallengeHeader } from '../../components/challenge/ChallengeHeader';
 import { RuleCard } from '../../components/challenge/RuleCard';
 import { StatusCard } from '../../components/challenge/StatusCard';
@@ -11,6 +12,7 @@ import { dateKeys } from '../../utils/dateKeys';
 import { CheckInService } from '../../services/checkInService';
 import { MessageService } from '../../services/messageService';
 import { ChallengeService } from '../../services/challengeService';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 type ChallengeType = "standard" | "progress" | "elimination" | "deadline";
 type CadenceUnit = "daily" | "weekly";
@@ -100,48 +102,97 @@ export const ChallengeDetailScreen = ({
   navigation,
   route,
 }: any) => {
+  const { colors } = useColorMode();
   const initialData = route?.params || {};
-  
-  // State for challenge data
+  const challengeIdParam = initialData.challengeId;
+  const currentUserIdParam = initialData.currentUserId;
+
+  // State for challenge data (may be loaded from challengeId on mount)
   const [challenge, setChallenge] = useState(initialData.challenge);
   const [group, setGroup] = useState(initialData.group);
-  const [currentUserId] = useState(initialData.currentUserId);
+  const [currentUserId, setCurrentUserId] = useState(initialData.currentUserId ?? currentUserIdParam);
   const [checkInsForCurrentPeriod, setCheckInsForCurrentPeriod] = useState(initialData.checkInsForCurrentPeriod || []);
-  const [myRecentCheckIns, setMyRecentCheckIns] = useState(initialData.myRecentCheckIns || []); // Current user's check-ins from last 30 days
-  // Initialize allRecentCheckIns - use checkInsForCurrentPeriod as fallback to show today's data immediately
-  const [allRecentCheckIns, setAllRecentCheckIns] = useState<any[]>(initialData.allRecentCheckIns || []); 
-  const [challengeMembers] = useState(initialData.challengeMembers || []);
-  const [memberProfiles] = useState(initialData.memberProfiles || {});
-  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
+  const [myRecentCheckIns, setMyRecentCheckIns] = useState(initialData.myRecentCheckIns || []);
+  const [allRecentCheckIns, setAllRecentCheckIns] = useState<any[]>(initialData.allRecentCheckIns || []);
+  const [challengeMembers, setChallengeMembers] = useState(initialData.challengeMembers || []);
+  const [memberProfiles, setMemberProfiles] = useState(initialData.memberProfiles || {});
+  const [loadingDetails, setLoadingDetails] = useState(!!(challengeIdParam && currentUserIdParam && !initialData.challenge));
+  
+  // Get current period key for default selection
+  const getCurrentPeriodKey = () => {
+    if (challenge?.cadence?.unit === 'daily') {
+      return dateKeys.getCurrentCheckInPeriod(challenge.due?.dueTimeLocal || '23:59');
+    } else {
+      return dateKeys.getWeekKey(new Date(), challenge?.cadence?.weekStartsOn || 0);
+    }
+  };
+  
+  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(() => {
+    if (initialData.challenge) {
+      const c = initialData.challenge;
+      return c.cadence?.unit === 'daily'
+        ? dateKeys.getCurrentCheckInPeriod(c.due?.dueTimeLocal || '23:59')
+        : dateKeys.getWeekKey(new Date(), c.cadence?.weekStartsOn || 0);
+    }
+    return null;
+  });
 
   // Compute current user status
   const [userStatus, setUserStatus] = useState<UserStatus | null>(null);
   const [optimisticComplete, setOptimisticComplete] = useState(false);
 
-  // Load full historical data on mount if not provided
+  // When navigated with only challengeId + currentUserId, load full details immediately
+  useEffect(() => {
+    if (!challengeIdParam || !currentUserIdParam || initialData.challenge) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const details = await ChallengeService.getChallengeDetails(challengeIdParam, currentUserIdParam);
+        if (cancelled) return;
+        setChallenge(details.challenge);
+        setGroup(details.group);
+        setCurrentUserId(currentUserIdParam);
+        setCheckInsForCurrentPeriod(details.checkInsForCurrentPeriod || []);
+        setMyRecentCheckIns(details.myRecentCheckIns || []);
+        setAllRecentCheckIns(details.allRecentCheckIns || []);
+        setChallengeMembers(details.challengeMembers || []);
+        setMemberProfiles(details.memberProfiles || {});
+        const currentPeriodKey = details.challenge?.cadence?.unit === 'daily'
+          ? dateKeys.getCurrentCheckInPeriod(details.challenge.due?.dueTimeLocal || '23:59')
+          : dateKeys.getWeekKey(new Date(), details.challenge?.cadence?.weekStartsOn || 0);
+        setSelectedDayKey(currentPeriodKey);
+      } catch (e) {
+        if (!cancelled) Alert.alert('Error', 'Failed to load challenge');
+      } finally {
+        if (!cancelled) setLoadingDetails(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [challengeIdParam, currentUserIdParam]);
+
+  // Load full historical data on mount if not provided (when we already had challenge from params)
   useEffect(() => {
     const loadFullData = async () => {
-      if (!initialData.allRecentCheckIns && challenge?.id && currentUserId) {
-        console.log('Loading full check-in history...');
+      if (!initialData.allRecentCheckIns && challenge?.id && currentUserId && !challengeIdParam) {
         try {
-          const challengeDetails = await ChallengeService.getChallengeDetails(
-            challenge.id,
-            currentUserId
-          );
-          // Update allRecentCheckIns with full data
-          setAllRecentCheckIns(challengeDetails.allRecentCheckIns || []);
-          // Only update checkInsForCurrentPeriod if we're not viewing a historical day
+          const challengeDetails = await ChallengeService.getChallengeDetails(challenge.id, currentUserId);
+          setAllRecentCheckIns((prev: any[]) => (prev.length === 0 ? (challengeDetails.allRecentCheckIns || []) : prev));
           if (!selectedDayKey) {
-            setCheckInsForCurrentPeriod(challengeDetails.checkInsForCurrentPeriod);
+            setCheckInsForCurrentPeriod((prev: any[]) =>
+              prev.length === challengeDetails.checkInsForCurrentPeriod?.length ? prev : challengeDetails.checkInsForCurrentPeriod || []);
+            const currentPeriodKey = challenge.cadence?.unit === 'daily'
+              ? dateKeys.getCurrentCheckInPeriod(challenge.due?.dueTimeLocal || '23:59')
+              : dateKeys.getWeekKey(new Date(), challenge.cadence?.weekStartsOn || 0);
+            setSelectedDayKey(currentPeriodKey);
           }
         } catch (error) {
           console.error('Error loading full check-in data:', error);
         }
       }
     };
-    
     loadFullData();
-  }, []); // Only run once on mount
+  }, []);
 
   useEffect(() => {
     if (!challenge || !currentUserId) return;
@@ -153,27 +204,31 @@ export const ChallengeDetailScreen = ({
       challengeMembers,
       selectedDayKey || undefined // Pass selected day to determine if it's historical
     );
+    console.log('Computed user status:', status, 'for day:', selectedDayKey || 'current');
     setUserStatus(status);
   }, [challenge, currentUserId, checkInsForCurrentPeriod, challengeMembers, selectedDayKey]);
   
   // Function to reload challenge data
   const reloadChallengeData = async () => {
     try {
+      console.log('Reloading challenge data after submission...');
       const challengeDetails = await ChallengeService.getChallengeDetails(
         challenge.id,
         currentUserId
       );
+      console.log('Reloaded data - allRecentCheckIns:', challengeDetails.allRecentCheckIns?.length || 0);
+      console.log('Reloaded data - checkInsForCurrentPeriod:', challengeDetails.checkInsForCurrentPeriod?.length || 0);
+      
       setChallenge(challengeDetails.challenge);
       setAllRecentCheckIns(challengeDetails.allRecentCheckIns || []);
       setMyRecentCheckIns(challengeDetails.myRecentCheckIns);
       
-      // If a day is selected, re-apply the filter with new data
-      if (selectedDayKey) {
-        const filtered = filterCheckInsByPeriod(challengeDetails.allRecentCheckIns || [], selectedDayKey);
-        setCheckInsForCurrentPeriod(filtered);
-      } else {
-        setCheckInsForCurrentPeriod(challengeDetails.checkInsForCurrentPeriod);
-      }
+      // After submission, always reset to current period (based on due time)
+      const currentPeriodKey = getCurrentPeriodKey();
+      
+      console.log('Resetting to current period:', currentPeriodKey);
+      setSelectedDayKey(currentPeriodKey);
+      setCheckInsForCurrentPeriod(challengeDetails.checkInsForCurrentPeriod);
     } catch (error) {
       console.error('Error reloading challenge data:', error);
     }
@@ -192,24 +247,103 @@ export const ChallengeDetailScreen = ({
   // Function to handle day selection in history
   const handleDaySelected = (dayKey: string) => {
     console.log('Loading data for day:', dayKey);
+    
+    // Check if clicking on the current period (based on due time)
+    const currentPeriodKey = getCurrentPeriodKey();
+    const isSelectingCurrentPeriod = dayKey === currentPeriodKey;
+    
+    // If clicking on current period, reset to show current data
+    if (isSelectingCurrentPeriod) {
+      console.log('Clicking on current period - resetting to current data');
+      setSelectedDayKey(currentPeriodKey);
+      
+      // Use allRecentCheckIns if available, otherwise use current state
+      if (allRecentCheckIns.length > 0) {
+        const filtered = filterCheckInsByPeriod(allRecentCheckIns, dayKey);
+        console.log(`Filtered current period from allRecentCheckIns: ${filtered.length} check-ins`);
+        setCheckInsForCurrentPeriod(filtered);
+      } else {
+        // allRecentCheckIns not loaded yet, keep current checkInsForCurrentPeriod as-is
+        console.log('allRecentCheckIns not loaded, keeping current checkInsForCurrentPeriod state');
+        // Don't change checkInsForCurrentPeriod - it already has the right data
+      }
+      return;
+    }
+    
+    // Selecting a historical period
     setSelectedDayKey(dayKey);
     
-    // If allRecentCheckIns is empty (still loading), use initialData as fallback for current period
-    const checkInsToFilter = allRecentCheckIns.length > 0 ? allRecentCheckIns : initialData.checkInsForCurrentPeriod || [];
+    // If allRecentCheckIns is empty, we can't show historical data
+    if (allRecentCheckIns.length === 0) {
+      console.log('Historical period selected but allRecentCheckIns not loaded yet');
+      setCheckInsForCurrentPeriod([]);
+      return;
+    }
     
-    // Filter check-ins for the selected day
-    const filteredCheckIns = filterCheckInsByPeriod(checkInsToFilter, dayKey);
+    // Filter check-ins for the selected historical day
+    const filteredCheckIns = filterCheckInsByPeriod(allRecentCheckIns, dayKey);
     console.log(`Filtered to ${filteredCheckIns.length} check-ins for ${challenge.cadence.unit === 'daily' ? 'day' : 'week'} ${dayKey}`);
-    console.log('Using check-ins:', checkInsToFilter.length, 'filtered:', filteredCheckIns);
+    console.log('Using check-ins from allRecentCheckIns:', allRecentCheckIns.length, 'filtered:', filteredCheckIns.length);
     setCheckInsForCurrentPeriod(filteredCheckIns);
   };
+  
+  // Format the selected day for display
+  const getSelectedDayLabel = (): string => {
+    if (!selectedDayKey) return '';
+    
+    // Parse as local date by adding time component
+    const date = new Date(selectedDayKey + 'T12:00:00');
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    const isToday = dateKeys.getDayKey(date) === dateKeys.getDayKey(today);
+    const isYesterday = dateKeys.getDayKey(date) === dateKeys.getDayKey(yesterday);
+    const isTomorrow = dateKeys.getDayKey(date) === dateKeys.getDayKey(tomorrow);
+    
+    // Format date (Feb 2nd, 2026)
+    const day = date.getDate();
+    const month = date.toLocaleDateString('en-US', { month: 'short' });
+    const year = date.getFullYear();
+    
+    // Get ordinal suffix (1st, 2nd, 3rd, 4th, etc.)
+    const getOrdinal = (n: number) => {
+      if (n > 3 && n < 21) return 'th';
+      switch (n % 10) {
+        case 1: return 'st';
+        case 2: return 'nd';
+        case 3: return 'rd';
+        default: return 'th';
+      }
+    };
+    
+    const formattedDate = `${month} ${day}${getOrdinal(day)}, ${year}`;
+    
+    if (isToday) return `${formattedDate} - Today`;
+    if (isTomorrow) return `${formattedDate} - Tomorrow`;
+    if (isYesterday) return `${formattedDate} - Yesterday`;
+    
+    return formattedDate;
+  };
 
-  // If required data is missing, show error
+  if (loadingDetails) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <CircleLoader dotColor={colors.accent} size="large" />
+          <Text style={{ fontSize: 16, color: colors.textSecondary, marginTop: 12 }}>Loading challenge...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (!challenge || !group || !currentUserId) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-          <Text style={{ fontSize: 16, color: '#666', textAlign: 'center' }}>
+          <Text style={{ fontSize: 16, color: colors.textSecondary, textAlign: 'center' }}>
             Challenge data not available
           </Text>
         </View>
@@ -219,6 +353,9 @@ export const ChallengeDetailScreen = ({
 
   const handleSubmitCheckIn = async (draft: CheckInDraft) => {
     console.log('Check-in submitted:', draft);
+    console.log('Current status:', userStatus);
+    console.log('Challenge due time:', challenge.due?.dueTimeLocal);
+    console.log('Current time:', new Date().toLocaleTimeString());
     
     try {
       // Optimistic update
@@ -235,18 +372,24 @@ export const ChallengeDetailScreen = ({
       let uploadedAttachments = draft.attachments || [];
       if (draft.attachments && draft.attachments.length > 0) {
         console.log('Uploading attachments to Firebase Storage...');
-        uploadedAttachments = await Promise.all(
-          draft.attachments.map(async (attachment) => {
-            try {
+        try {
+          uploadedAttachments = await Promise.all(
+            draft.attachments.map(async (attachment) => {
               const uploadedUrl = await MessageService.uploadImage(attachment.uri);
               console.log('Attachment uploaded:', uploadedUrl);
               return { type: attachment.type, uri: uploadedUrl };
-            } catch (error) {
-              console.error('Error uploading attachment:', error);
-              return attachment; // Keep original if upload fails
-            }
-          })
-        );
+            })
+          );
+        } catch (uploadError) {
+          console.error('Error uploading attachment:', uploadError);
+          setOptimisticComplete(false);
+          Alert.alert(
+            'Upload Failed',
+            'Failed to upload image. Please check your Firebase Storage permissions and try again.',
+            [{ text: 'OK' }]
+          );
+          return; // Stop submission if upload fails
+        }
       }
       
       // Save check-in to Firebase with uploaded URLs
@@ -281,7 +424,9 @@ export const ChallengeDetailScreen = ({
       }
       
       // Reload challenge data to update status
+      console.log('Check-in submitted successfully, reloading data...');
       await reloadChallengeData();
+      console.log('Data reloaded after submission');
       
       // Reset optimistic state
       setOptimisticComplete(false);
@@ -302,23 +447,40 @@ export const ChallengeDetailScreen = ({
     }
   };
 
+  const buildCheckInRequirements = (c: typeof challenge): string[] => {
+    const list: string[] = [];
+    const legacy = (c as any).requirements;
+    if (Array.isArray(legacy) && legacy.length > 0) {
+      list.push(...legacy.filter((r: any) => typeof r === 'string' && r.trim()));
+    }
+    if (c.submission?.requireAttachment) list.push('Photo proof required');
+    if (c.submission?.requireText) list.push('Note or caption required');
+    if (c.submission?.minTextLength) list.push(`Minimum ${c.submission.minTextLength} characters for text`);
+    if (c.submission?.minValue != null && c.submission?.inputType === 'number') {
+      list.push(`Minimum value: ${c.submission.minValue}${c.submission.unitLabel ? ` ${c.submission.unitLabel}` : ''}`);
+    }
+    if (c.submission?.minValue != null && c.submission?.inputType === 'timer') {
+      list.push(`Minimum time: ${Math.floor(c.submission.minValue / 60)} minutes`);
+    }
+    return list;
+  };
+
   const shouldShowComposer = () => {
     if (!userStatus) return false;
     if (optimisticComplete) return false;
     if (userStatus.type === 'completed') return false;
     if (userStatus.type === 'eliminated') return false;
-    if (userStatus.type === 'missed') return false; // Can't submit for missed periods
     
-    // Don't show composer if viewing a historical day (not today/this week)
-    if (selectedDayKey) {
-      const currentDayKey = dateKeys.getDayKey();
-      const currentWeekKey = dateKeys.getWeekKey(new Date(), challenge.cadence.weekStartsOn);
-      const currentPeriodKey = challenge.cadence.unit === 'daily' ? currentDayKey : currentWeekKey;
-      
-      if (selectedDayKey !== currentPeriodKey) {
-        return false; // Don't allow submission for past periods
-      }
+    // For pending status, ALWAYS show composer if we're viewing today
+    // The "pending" status means it's NOT completed yet, so we should allow submission
+    if (userStatus.type === 'pending') {
+      // Only check if we're viewing today (not a historical day)
+      const today = dateKeys.getDayKey(new Date());
+      return selectedDayKey === today;
     }
+    
+    // For missed status, don't allow submission
+    if (userStatus.type === 'missed') return false;
     
     return true;
   };
@@ -328,7 +490,7 @@ export const ChallengeDetailScreen = ({
     : userStatus;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -336,7 +498,7 @@ export const ChallengeDetailScreen = ({
       >
         {/* Header */}
         <ChallengeHeader
-          title={challenge.title}
+          title={challenge.title || (challenge as any).name || 'Untitled Challenge'}
           groupName={group.name}
           groupId={group.id}
           cadence={challenge.cadence}
@@ -344,6 +506,13 @@ export const ChallengeDetailScreen = ({
           onBack={() => navigation.goBack()}
           navigation={navigation}
         />
+        
+        {/* Selected Day Indicator */}
+        {selectedDayKey && (
+          <View style={[styles.dayIndicator, { backgroundColor: colors.surface, borderColor: colors.dividerLineTodo + '80' }]}>
+            <Text style={[styles.dayIndicatorText, { color: colors.accent }]}>{getSelectedDayLabel()}</Text>
+          </View>
+        )}
 
         {/* Rule Card */}
         <RuleCard
@@ -360,6 +529,15 @@ export const ChallengeDetailScreen = ({
           <StatusCard 
             status={displayStatus} 
             currentCheckIn={checkInsForCurrentPeriod.find((ci: any) => ci.userId === currentUserId)}
+            countdownTargetDate={
+              displayStatus.type === 'pending' && selectedDayKey === getCurrentPeriodKey()
+                ? dateKeys.getNextDueDate(
+                    challenge.due?.dueTimeLocal || '23:59',
+                    challenge.due?.deadlineDate,
+                    challenge.type
+                  )
+                : undefined
+            }
           />
         )}
 
@@ -374,6 +552,8 @@ export const ChallengeDetailScreen = ({
             minTextLength={challenge.submission.minTextLength}
             onSubmit={handleSubmitCheckIn}
             disabled={!shouldShowComposer()}
+            description={challenge.description}
+            requirements={buildCheckInRequirements(challenge)}
           />
         )}
 
@@ -398,6 +578,8 @@ export const ChallengeDetailScreen = ({
           navigation={navigation}
           onDaySelected={handleDaySelected}
           challengeCreatedAt={challenge.createdAt}
+          selectedDayKey={selectedDayKey}
+          dueTimeLocal={challenge.due?.dueTimeLocal}
         />
       </ScrollView>
     </SafeAreaView>
@@ -407,14 +589,24 @@ export const ChallengeDetailScreen = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F1F0ED',
   },
-
   scrollView: {
     flex: 1,
   },
-
   scrollContent: {
     paddingBottom: 40,
+  },
+  dayIndicator: {
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  dayIndicatorText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

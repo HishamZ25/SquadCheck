@@ -217,7 +217,9 @@ async function createChallenges(userIds, groupIds) {
       },
       due: {
         dueTimeLocal: '21:00',
-        timezoneMode: 'userLocal'
+        timezoneMode: 'userLocal',
+        timezone: 'America/New_York',
+        timezoneOffset: 300  // EST is UTC-5 (300 minutes)
       },
       rules: {
         elimination: {
@@ -241,7 +243,9 @@ async function createChallenges(userIds, groupIds) {
       },
       due: {
         dueTimeLocal: '23:59',
-        timezoneMode: 'userLocal'
+        timezoneMode: 'userLocal',
+        timezone: 'America/New_York',
+        timezoneOffset: 300  // EST is UTC-5 (300 minutes)
       },
       rules: {
         elimination: {

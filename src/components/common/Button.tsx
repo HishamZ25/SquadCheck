@@ -3,11 +3,12 @@ import {
   TouchableOpacity,
   Text,
   StyleSheet,
-  ActivityIndicator,
   ViewStyle,
   TextStyle,
 } from 'react-native';
 import { Theme } from '../../constants/theme';
+import { CircleLoader } from './CircleLoader';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 interface ButtonProps {
   title: string;
@@ -32,10 +33,15 @@ export const Button: React.FC<ButtonProps> = ({
   textStyle,
   fullWidth = false,
 }) => {
+  const { colors } = useColorMode();
+
   const buttonStyle = [
     styles.base,
     styles[variant],
     styles[size],
+    variant === 'primary' && { backgroundColor: colors.accent },
+    variant === 'secondary' && { backgroundColor: colors.accent },
+    variant === 'outline' && { borderColor: colors.accent },
     fullWidth && styles.fullWidth,
     disabled && styles.disabled,
     style,
@@ -45,6 +51,7 @@ export const Button: React.FC<ButtonProps> = ({
     styles.text,
     styles[`${variant}Text`],
     styles[`${size}Text`],
+    (variant === 'outline' || variant === 'ghost') && { color: colors.accent },
     disabled && styles.disabledText,
     textStyle,
   ];
@@ -54,11 +61,13 @@ export const Button: React.FC<ButtonProps> = ({
       style={buttonStyle}
       onPress={onPress}
       disabled={disabled || loading}
-      activeOpacity={0.8}
+      activeOpacity={0.7}
+      delayPressIn={0}
+      delayPressOut={0}
     >
       {loading ? (
-        <ActivityIndicator
-          color={variant === 'outline' || variant === 'ghost' ? Theme.colors.primary : Theme.colors.white}
+        <CircleLoader
+          dotColor={variant === 'outline' || variant === 'ghost' ? colors.accent : Theme.colors.white}
           size="small"
         />
       ) : (

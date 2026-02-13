@@ -272,22 +272,24 @@ export class GroupService {
 
     console.log('📋 Subscription query created');
 
-    return onSnapshot(groupsQuery, (querySnapshot) => {
-      console.log('📊 Subscription update - Total docs:', querySnapshot.size);
-      
-      const groups = querySnapshot.docs.map(doc => {
-        const data = doc.data();
-        console.log('📄 Subscription group doc:', doc.id, 'memberIds:', data.memberIds, 'status:', data.status);
-        return { 
-          id: doc.id, 
-          ...data,
-          createdAt: data.createdAt?.toDate() || new Date(),
-        } as Group;
-      });
-      
-      console.log('✅ Subscription callback with groups length:', groups.length);
-      callback(groups);
-    });
+    return onSnapshot(
+      groupsQuery,
+      (querySnapshot) => {
+        const groups = querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            createdAt: data.createdAt?.toDate() || new Date(),
+          } as Group;
+        });
+        callback(groups);
+      },
+      (err) => {
+        __DEV__ && console.warn('Firestore Listen (user groups) transport error, will retry:', err?.code || err?.message);
+        callback([]);
+      }
+    );
   }
 
   // Listen to user's pending invitations in real-time
@@ -299,12 +301,19 @@ export class GroupService {
       orderBy('sentAt', 'desc')
     );
 
-    return onSnapshot(invitationsQuery, (querySnapshot) => {
-      const invitations = querySnapshot.docs.map(doc => ({ 
-        id: doc.id, 
-        ...doc.data() 
-      }) as GroupInvitation);
-      callback(invitations);
-    });
+    return onSnapshot(
+      invitationsQuery,
+      (querySnapshot) => {
+        const invitations = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }) as GroupInvitation);
+        callback(invitations);
+      },
+      (err) => {
+        __DEV__ && console.warn('Firestore Listen (invitations) transport error, will retry:', err?.code || err?.message);
+        callback([]);
+      }
+    );
   }
 } 

@@ -2,18 +2,23 @@ import React from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { challengeEval, type UserStatus } from '../../utils/challengeEval';
+import { CountdownTimer } from '../common/CountdownTimer';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 interface StatusCardProps {
   status: UserStatus;
   currentCheckIn?: any; // The check-in data for completed status
+  /** When status is pending, pass target date for live countdown */
+  countdownTargetDate?: Date | null;
 }
 
-export const StatusCard: React.FC<StatusCardProps> = ({ status, currentCheckIn }) => {
+export const StatusCard: React.FC<StatusCardProps> = ({ status, currentCheckIn, countdownTargetDate }) => {
+  const { colors } = useColorMode();
   const getStatusConfig = () => {
     switch (status.type) {
       case 'completed':
         return {
-          backgroundColor: '#4CAF50',
+          backgroundColor: '#22C55E',
           icon: 'checkmark-circle' as const,
           title: 'Completed',
           subtitle: challengeEval.formatTimestamp(status.timestamp),
@@ -27,8 +32,8 @@ export const StatusCard: React.FC<StatusCardProps> = ({ status, currentCheckIn }
         };
       case 'missed':
         return {
-          backgroundColor: '#F44336',
-          icon: 'close-circle' as const,
+          backgroundColor: '#6B7280',
+          icon: 'ellipse-outline' as const,
           title: 'Missed',
           subtitle: 'Due at ' + status.missedAt,
         };
@@ -44,16 +49,45 @@ export const StatusCard: React.FC<StatusCardProps> = ({ status, currentCheckIn }
 
   const config = getStatusConfig();
   const isCompleted = status.type === 'completed';
+  const isPending = status.type === 'pending';
+  const showCountdown = isPending && countdownTargetDate && countdownTargetDate.getTime() > Date.now();
 
   return (
-    <View style={[styles.container, { backgroundColor: config.backgroundColor }]}>
-      <View style={styles.header}>
-        <Ionicons name={config.icon} size={24} color="#FFF" style={styles.icon} />
-        <View style={styles.headerText}>
-          <Text style={styles.title}>{config.title}</Text>
-          <Text style={styles.subtitle}>{config.subtitle}</Text>
-        </View>
-      </View>
+    <View style={[
+      styles.container,
+      { backgroundColor: config.backgroundColor, borderWidth: 1, borderColor: colors.dividerLineTodo + '60' },
+      isPending && styles.containerPending,
+    ]}>
+      {isPending ? (
+        <>
+          <Text style={styles.pendingTitle}>PENDING</Text>
+          {showCountdown ? (
+            <View style={styles.countdownWrap}>
+              <CountdownTimer
+                targetDate={countdownTargetDate}
+                label=""
+                numberColor="#FFF"
+                labelColor="rgba(255,255,255,0.95)"
+                size="small"
+                showLabels={true}
+                finishText="Time's up!"
+              />
+            </View>
+          ) : (
+            <Text style={styles.subtitle}>{config.subtitle}</Text>
+          )}
+        </>
+      ) : (
+        <>
+          <View style={styles.header}>
+            <Ionicons name={config.icon} size={24} color="#FFF" style={styles.icon} />
+            <View style={styles.headerText}>
+              <Text style={styles.title}>{config.title}</Text>
+              <Text style={styles.subtitle}>{config.subtitle}</Text>
+            </View>
+          </View>
+        </>
+      )}
       
       {/* Show submission details when completed */}
       {isCompleted && currentCheckIn && (
@@ -92,35 +126,46 @@ export const StatusCard: React.FC<StatusCardProps> = ({ status, currentCheckIn }
 const styles = StyleSheet.create({
   container: {
     marginHorizontal: 16,
-    marginTop: 16,
+    marginTop: 12,
+    marginBottom: 12,
     padding: 14,
     borderRadius: 12,
   },
-
+  containerPending: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  pendingTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFF',
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-
   icon: {
     marginRight: 10,
   },
-
   headerText: {
     flex: 1,
   },
-
   title: {
     fontSize: 16,
     fontWeight: '700',
     color: '#FFF',
     marginBottom: 2,
   },
-
   subtitle: {
     fontSize: 13,
     color: 'rgba(255,255,255,0.95)',
     fontWeight: '500',
+  },
+  countdownWrap: {
+    marginTop: 2,
   },
   
   submissionDetails: {

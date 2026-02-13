@@ -13,7 +13,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Theme } from '../../constants/theme';
 import { Button } from '../../components/common/Button';
+import { Input } from '../../components/common/Input';
 import { Avatar } from '../../components/common/Avatar';
+import { CircleLoader } from '../../components/common/CircleLoader';
 import { GroupService } from '../../services/groupService';
 import { FriendshipService } from '../../services/friendshipService';
 import { auth } from '../../services/firebase';
@@ -99,22 +101,19 @@ export const CreateSimpleGroupScreen: React.FC<CreateSimpleGroupScreenProps> = (
       }
 
       // Create the group in Firebase
-      const groupId = await GroupService.createGroup(
+      await GroupService.createGroup(
         groupName.trim(),
         description.trim(),
         currentUser.uid,
         selectedFriends.map(f => f.id)
       );
 
+      // Navigate to Groups first, then show success (so user sees their new group)
+      navigation.goBack();
       Alert.alert(
         'Group Created! 🎉', 
         `Your group "${groupName}" has been created successfully!`,
-        [
-          { 
-            text: 'OK', 
-            onPress: () => navigation.goBack()
-          }
-        ]
+        [{ text: 'OK' }]
       );
     } catch (error: any) {
       console.error('Error creating group:', error);
@@ -131,7 +130,7 @@ export const CreateSimpleGroupScreen: React.FC<CreateSimpleGroupScreenProps> = (
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <Ionicons name="arrow-back" size={22} color="#000000" />
+            <Ionicons name="arrow-back" size={22} color="#000" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Create New Group</Text>
           <View style={styles.placeholder} />
@@ -139,27 +138,25 @@ export const CreateSimpleGroupScreen: React.FC<CreateSimpleGroupScreenProps> = (
 
         {/* Group Name Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Group Name</Text>
-          <TextInput
-            style={styles.textInput}
+          <Input
+            label="Group Name"
             placeholder="Enter group name..."
-            placeholderTextColor={Theme.colors.textTertiary}
             value={groupName}
             onChangeText={setGroupName}
+            variant="light"
           />
         </View>
 
         {/* Description Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Description</Text>
-          <TextInput
-            style={[styles.textInput, styles.descriptionInput]}
+          <Input
+            label="Description"
             placeholder="What is this group about?"
-            placeholderTextColor={Theme.colors.textTertiary}
             value={description}
             onChangeText={setDescription}
             multiline
             numberOfLines={4}
+            variant="light"
           />
         </View>
 
@@ -172,7 +169,7 @@ export const CreateSimpleGroupScreen: React.FC<CreateSimpleGroupScreenProps> = (
 
           {loadingFriends ? (
             <View style={styles.loadingFriends}>
-              <Ionicons name="refresh" size={24} color={Theme.colors.gray400} />
+              <CircleLoader dotColor="#FF6B35" size="medium" />
               <Text style={styles.loadingFriendsText}>Loading friends...</Text>
             </View>
           ) : friends.length === 0 ? (
@@ -213,7 +210,7 @@ export const CreateSimpleGroupScreen: React.FC<CreateSimpleGroupScreenProps> = (
           <Button
             title="Create Group"
             onPress={handleCreateGroup}
-            variant="primary"
+            variant="secondary"
             style={styles.createButton}
           />
         </View>
@@ -236,22 +233,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Theme.layout.screenPadding,
-    paddingVertical: Theme.spacing.lg,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+    backgroundColor: '#F1F0ED',
   },
-  
   backButton: {
-    padding: Theme.spacing.sm,
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    padding: 8,
   },
-  
   headerTitle: {
-    ...Theme.typography.h2,
-    color: '#FF6B35',
+    fontSize: 28,
     fontWeight: '700',
+    color: '#000',
     flex: 1,
     textAlign: 'center',
   },
-  
   placeholder: {
     width: 48,
   },
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
   
   sectionTitle: {
     ...Theme.typography.h4,
-    color: '#000000',
+    color: '#333',
     marginBottom: Theme.spacing.sm,
     fontWeight: '600',
     textAlign: 'center',
@@ -272,7 +272,7 @@ const styles = StyleSheet.create({
   
   sectionSubtitle: {
     ...Theme.typography.bodySmall,
-    color: '#666666',
+    color: '#555',
     marginBottom: Theme.spacing.md,
     textAlign: 'center',
   },
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
     borderColor: '#FF6B35',
     borderRadius: Theme.borderRadius.md,
     padding: Theme.spacing.md,
-    color: '#000000',
+    color: '#333',
     fontSize: 16,
     minHeight: Theme.layout.inputHeight,
   },
@@ -304,14 +304,14 @@ const styles = StyleSheet.create({
   },
   
   friendItemSelected: {
-    backgroundColor: Theme.colors.primary,
+    backgroundColor: '#FFF5F0',
     borderWidth: 2,
-    borderColor: Theme.colors.secondary,
+    borderColor: '#FF6B35',
   },
   
   friendName: {
     ...Theme.typography.body,
-    color: '#000000',
+    color: '#333',
     marginLeft: Theme.spacing.md,
     flex: 1,
   },
@@ -327,7 +327,7 @@ const styles = StyleSheet.create({
   
   loadingFriendsText: {
     ...Theme.typography.bodySmall,
-    color: '#666666',
+    color: '#555',
     marginTop: Theme.spacing.sm,
   },
   
@@ -338,14 +338,14 @@ const styles = StyleSheet.create({
   
   noFriendsText: {
     ...Theme.typography.body,
-    color: '#666666',
+    color: '#555',
     marginTop: Theme.spacing.md,
     marginBottom: Theme.spacing.xs,
   },
   
   noFriendsSubtext: {
     ...Theme.typography.bodySmall,
-    color: '#999999',
+    color: '#666',
     textAlign: 'center',
   },
   
