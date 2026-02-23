@@ -53,18 +53,14 @@ export const SocialScreen: React.FC<SocialScreenProps> = ({ navigation }) => {
           onPress={() => setActiveTab('groups')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'groups' && { color: '#FFF' }]}>
-            Groups
-          </Text>
+          <Text style={[styles.tabText, { color: colors.text }, activeTab === 'groups' && { color: '#FFF' }]}>Groups</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'friends' && [styles.tabActive, { backgroundColor: colors.accent }]]}
           onPress={() => setActiveTab('friends')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'friends' && { color: '#FFF' }]}>
-            Friends
-          </Text>
+          <Text style={[styles.tabText, { color: colors.text }, activeTab === 'friends' && { color: '#FFF' }]}>Friends</Text>
         </TouchableOpacity>
       </View>
 
@@ -99,11 +95,10 @@ const styles = StyleSheet.create({
   },
   tabContainer: {
     flexDirection: 'row',
-    marginHorizontal: 20,
-    marginBottom: 16,
+    marginHorizontal: 16,
+    marginBottom: 12,
     borderRadius: 12,
     padding: 4,
-    gap: 4,
   },
   tab: {
     flex: 1,
@@ -114,10 +109,9 @@ const styles = StyleSheet.create({
   },
   tabActive: {},
   tabText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
   },
-  tabTextActive: {},
   content: {
     flex: 1,
   },

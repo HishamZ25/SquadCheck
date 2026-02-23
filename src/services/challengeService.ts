@@ -18,33 +18,50 @@ import {
 import { db } from './firebase';
 import { Challenge } from '../types';
 import { dateKeys } from '../utils/dateKeys';
-import { computeNextDueAtUtc } from '../utils/dueTime';
+import {
+  computeNextDueAtUtc,
+  resolveAdminTimeZone,
+  getAdminZoneDayKey,
+  getCurrentPeriodDayKey,
+  getCurrentPeriodWeekKey,
+} from '../utils/dueTime';
+import { userCache } from './userCache';
 
 export class ChallengeService {
-  // Create a new challenge (legacy - keeping for backward compatibility)
   static async createChallenge(
     name: string,
     description: string,
-    type: 'elimination' | 'deadline' | 'progression',
+    type: 'elimination' | 'deadline' | 'progress',
     challengeType: 'solo' | 'group',
     creatorId: string,
     groupId?: string,
-    requirements: string[] = [],
-    rewards: {
-      points: number;
-      title?: string;
-      picture?: string;
-      badge?: string;
-    } = { points: 0 },
-    penalty: number = 0,
-    eliminationRule?: string,
-    startDate?: Date,
-    endDate?: Date,
-    progressionDuration?: number,
-    progressionIntervalType?: string,
-    assessmentTime?: Date
+    options?: {
+      requirements?: string[];
+      eliminationRule?: string;
+      strikesAllowed?: number;
+      startDate?: Date;
+      endDate?: Date;
+      progressionDuration?: number;
+      progressionIntervalType?: string;
+      assessmentTime?: Date;
+      cadence?: { unit: 'daily' | 'weekly'; requiredCount?: number; weekStartsOn?: number };
+      submission?: {
+        inputType: 'boolean' | 'number' | 'text' | 'timer';
+        unitLabel?: string;
+        minValue?: number;
+        requireAttachment?: boolean;
+        requireText?: boolean;
+        minTextLength?: number;
+      };
+    }
   ): Promise<string> {
     try {
+      const opts = options || {};
+      const requirements = opts.requirements || [];
+      const cadence = opts.cadence ?? { unit: 'daily' as const, weekStartsOn: 0 };
+      const submission = opts.submission ?? { inputType: 'boolean' as const, requireAttachment: false };
+      const assessmentTime = opts.assessmentTime;
+
       // Resolve admin timezone from device IANA timezone
       const adminTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
       const dueTimeLocal = assessmentTime
@@ -53,47 +70,59 @@ export class ChallengeService {
 
       const challengeData: any = {
         name,
-        title: name, // Also set title for new schema compatibility
+        title: name,
         description,
         type,
         challengeType,
         creatorId,
-        participantIds: [creatorId], // Creator is automatically a participant
+        participantIds: [creatorId],
         requirements,
-        rewards,
-        penalty,
+        rewards: { points: 0 },
+        penalty: 0,
         userProgress: {},
         createdAt: new Date(),
         status: 'active',
         state: 'active',
-        cadence: { unit: 'daily', weekStartsOn: 0 },
+        cadence: { unit: cadence.unit, weekStartsOn: cadence.weekStartsOn ?? 0, ...(cadence.requiredCount != null && { requiredCount: cadence.requiredCount }) },
         due: {
           dueTimeLocal,
           timezoneMode: 'groupLocal',
           timezone: adminTimeZone,
           timezoneOffset: new Date().getTimezoneOffset(),
         },
-        submission: { inputType: 'boolean', requireAttachment: false },
+        submission,
         createdBy: creatorId,
         adminUserId: creatorId,
         adminTimeZone,
-        nextDueAtUtc: computeNextDueAtUtc(adminTimeZone, dueTimeLocal, 'daily', 0),
+        nextDueAtUtc: computeNextDueAtUtc(adminTimeZone, dueTimeLocal, cadence.unit, cadence.weekStartsOn ?? 0),
       };
 
       // Only add optional fields if they are defined
       if (challengeType === 'group' && groupId) {
         challengeData.groupId = groupId;
       }
-      if (eliminationRule) challengeData.eliminationRule = eliminationRule;
-      if (startDate) challengeData.startDate = startDate;
-      if (endDate) challengeData.endDate = endDate;
-      if (progressionDuration) challengeData.progressionDuration = progressionDuration;
-      if (progressionIntervalType) challengeData.progressionIntervalType = progressionIntervalType;
+      if (opts.eliminationRule) challengeData.eliminationRule = opts.eliminationRule;
+      if (type === 'elimination') {
+        challengeData.rules = { elimination: { strikesAllowed: opts.strikesAllowed ?? 0 } };
+      }
+      if (opts.startDate) challengeData.startDate = opts.startDate;
+      if (opts.endDate) {
+        challengeData.endDate = opts.endDate;
+        // Store deadlineDate in due object so deadline-specific logic works everywhere
+        const y = opts.endDate.getFullYear();
+        const m = String(opts.endDate.getMonth() + 1).padStart(2, '0');
+        const d = String(opts.endDate.getDate()).padStart(2, '0');
+        challengeData.due.deadlineDate = `${y}-${m}-${d}`;
+      }
+      if (opts.progressionDuration) challengeData.progressionDuration = opts.progressionDuration;
+      if (opts.progressionIntervalType) challengeData.progressionIntervalType = opts.progressionIntervalType;
       if (assessmentTime) challengeData.assessmentTime = assessmentTime;
 
       const docRef = await addDoc(collection(db, 'challenges'), challengeData);
-      
-      // Add creator to challengeMembers (required for getUserChallenges to find the challenge)
+
+      // Add creator member + update group in parallel (both depend on docRef.id only)
+      const postCreateOps: Promise<any>[] = [];
+
       const creatorMemberId = `${docRef.id}_${creatorId}`;
       const creatorMemberData: Record<string, unknown> = {
         challengeId: docRef.id,
@@ -104,19 +133,21 @@ export class ChallengeService {
       if (challengeType === 'group' && groupId) {
         creatorMemberData.groupId = groupId;
       }
-      await setDoc(doc(db, 'challengeMembers', creatorMemberId), creatorMemberData, { merge: true });
-      
-      // If it's a group challenge, add the challenge ID to the group
+      postCreateOps.push(
+        setDoc(doc(db, 'challengeMembers', creatorMemberId), creatorMemberData, { merge: true })
+      );
+
       if (challengeType === 'group' && groupId) {
-        const groupRef = doc(db, 'groups', groupId);
-        await updateDoc(groupRef, {
-          challengeIds: arrayUnion(docRef.id)
-        });
+        postCreateOps.push(
+          updateDoc(doc(db, 'groups', groupId), { challengeIds: arrayUnion(docRef.id) })
+        );
       }
-      
+
+      await Promise.all(postCreateOps);
+
       return docRef.id;
     } catch (error) {
-      console.error('Error creating challenge:', error);
+      if (__DEV__) console.error('Error creating challenge:', error);
       throw error;
     }
   }
@@ -146,7 +177,7 @@ export class ChallengeService {
       }
       return null;
     } catch (error) {
-      console.error('Error getting challenge:', error);
+      if (__DEV__) console.error('Error getting challenge:', error);
       return null;
     }
   }
@@ -190,51 +221,57 @@ export class ChallengeService {
         seenIds.add(id);
       }
 
-      // Batch fetch by id (max 10 per 'in' query)
+      // Batch fetch by id (max 10 per 'in' query) — all batches in parallel
       const allIds = [...seenIds];
+      const batchPromises: Promise<void>[] = [];
       for (let i = 0; i < allIds.length; i += 10) {
         const batch = allIds.slice(i, i + 10);
-        const challengesQuery = query(
-          collection(db, 'challenges'),
-          where('__name__', 'in', batch)
+        batchPromises.push(
+          getDocs(query(
+            collection(db, 'challenges'),
+            where('__name__', 'in', batch)
+          )).then(challengesSnapshot => {
+            challengesSnapshot.docs.forEach(d => {
+              challenges.push(ChallengeService.normalizeChallengeDoc(d));
+            });
+          })
         );
-        const challengesSnapshot = await getDocs(challengesQuery);
-        challengesSnapshot.docs.forEach(d => {
-          challenges.push(ChallengeService.normalizeChallengeDoc(d));
+      }
+      await Promise.all(batchPromises);
+
+      // 2-3) Fallback queries only if challengeMembers returned 0 results (legacy data)
+      if (challenges.length === 0) {
+        const [createdBySnapshot, participantSnapshot] = await Promise.all([
+          getDocs(query(
+            collection(db, 'challenges'),
+            where('createdBy', '==', userId)
+          )),
+          getDocs(query(
+            collection(db, 'challenges'),
+            where('participantIds', 'array-contains', userId)
+          )),
+        ]);
+
+        createdBySnapshot.docs.forEach(d => {
+          if (!seenIds.has(d.id)) {
+            seenIds.add(d.id);
+            challenges.push(ChallengeService.normalizeChallengeDoc(d));
+          }
+        });
+
+        participantSnapshot.docs.forEach(d => {
+          if (!seenIds.has(d.id)) {
+            seenIds.add(d.id);
+            challenges.push(ChallengeService.normalizeChallengeDoc(d));
+          }
         });
       }
-
-      // 2) Fallback: challenges created by this user (in case challengeMembers is missing)
-      const createdByQuery = query(
-        collection(db, 'challenges'),
-        where('createdBy', '==', userId)
-      );
-      const createdBySnapshot = await getDocs(createdByQuery);
-      createdBySnapshot.docs.forEach(d => {
-        if (!seenIds.has(d.id)) {
-          seenIds.add(d.id);
-          challenges.push(ChallengeService.normalizeChallengeDoc(d));
-        }
-      });
-
-      // 3) Fallback: challenges where user is in participantIds (legacy)
-      const participantQuery = query(
-        collection(db, 'challenges'),
-        where('participantIds', 'array-contains', userId)
-      );
-      const participantSnapshot = await getDocs(participantQuery);
-      participantSnapshot.docs.forEach(d => {
-        if (!seenIds.has(d.id)) {
-          seenIds.add(d.id);
-          challenges.push(ChallengeService.normalizeChallengeDoc(d));
-        }
-      });
 
       // Sort by createdAt desc
       challenges.sort((a, b) => (b.createdAt?.getTime?.() ?? 0) - (a.createdAt?.getTime?.() ?? 0));
       return challenges;
     } catch (error) {
-      console.error('Error getting user challenges:', error);
+      if (__DEV__) console.error('Error getting user challenges:', error);
       return [];
     }
   }
@@ -268,34 +305,39 @@ export class ChallengeService {
       list.sort((a, b) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0));
       return list;
     } catch (error) {
-      console.error('Error getting group challenges:', error);
+      if (__DEV__) console.error('Error getting group challenges:', error);
       return [];
     }
   }
 
   // Add participant to challenge (also adds to challengeMembers for getUserChallenges)
-  static async addParticipant(challengeId: string, userId: string): Promise<void> {
+  static async addParticipant(challengeId: string, userId: string, groupId?: string): Promise<void> {
     try {
-      const challengeRef = doc(db, 'challenges', challengeId);
-      await updateDoc(challengeRef, {
-        participantIds: arrayUnion(userId),
-        [`userProgress.${userId}`]: {
-          userId,
-          checkIns: [],
-          eliminated: false,
-          completed: false,
-          streak: 0,
-        }
-      });
       const memberId = `${challengeId}_${userId}`;
-      await setDoc(doc(db, 'challengeMembers', memberId), {
+      const memberData: Record<string, unknown> = {
         challengeId,
         userId,
         state: 'active',
         strikes: 0,
-      }, { merge: true });
+      };
+      if (groupId) memberData.groupId = groupId;
+
+      // Update challenge doc + create member doc in parallel
+      await Promise.all([
+        updateDoc(doc(db, 'challenges', challengeId), {
+          participantIds: arrayUnion(userId),
+          [`userProgress.${userId}`]: {
+            userId,
+            checkIns: [],
+            eliminated: false,
+            completed: false,
+            streak: 0,
+          }
+        }),
+        setDoc(doc(db, 'challengeMembers', memberId), memberData, { merge: true }),
+      ]);
     } catch (error) {
-      console.error('Error adding participant:', error);
+      if (__DEV__) console.error('Error adding participant:', error);
       throw error;
     }
   }
@@ -308,7 +350,7 @@ export class ChallengeService {
         participantIds: arrayRemove(userId)
       });
     } catch (error) {
-      console.error('Error removing participant:', error);
+      if (__DEV__) console.error('Error removing participant:', error);
       throw error;
     }
   }
@@ -333,7 +375,7 @@ export class ChallengeService {
         [`userProgress.${userId}`]: progress
       });
     } catch (error) {
-      console.error('Error updating user progress:', error);
+      if (__DEV__) console.error('Error updating user progress:', error);
       throw error;
     }
   }
@@ -344,7 +386,7 @@ export class ChallengeService {
       const challengeRef = doc(db, 'challenges', challengeId);
       await updateDoc(challengeRef, updates);
     } catch (error) {
-      console.error('Error updating challenge:', error);
+      if (__DEV__) console.error('Error updating challenge:', error);
       throw error;
     }
   }
@@ -368,7 +410,7 @@ export class ChallengeService {
       
       await deleteDoc(doc(db, 'challenges', challengeId));
     } catch (error) {
-      console.error('Error deleting challenge:', error);
+      if (__DEV__) console.error('Error deleting challenge:', error);
       throw error;
     }
   }
@@ -450,6 +492,16 @@ export class ChallengeService {
       }
 
       const challengeData: any = challengeDoc.data();
+      // Normalize deadlineDate: may arrive as Firestore Timestamp
+      let deadlineDate = challengeData.due?.deadlineDate;
+      if (deadlineDate && typeof deadlineDate !== 'string') {
+        if (deadlineDate.toDate) {
+          const d = deadlineDate.toDate() as Date;
+          deadlineDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        } else if (deadlineDate instanceof Date) {
+          deadlineDate = `${deadlineDate.getFullYear()}-${String(deadlineDate.getMonth() + 1).padStart(2, '0')}-${String(deadlineDate.getDate()).padStart(2, '0')}`;
+        }
+      }
       const challenge: any = {
         id: challengeDoc.id,
         ...challengeData,
@@ -457,56 +509,22 @@ export class ChallengeService {
         // Ensure cadence has default values
         cadence: challengeData.cadence || { unit: 'daily', weekStartsOn: 0 },
         // Ensure submission has default values
-        submission: challengeData.submission || { 
-          inputType: 'boolean', 
+        submission: challengeData.submission || {
+          inputType: 'boolean',
           requireAttachment: false,
-          attachmentTypes: [] 
+          attachmentTypes: []
         },
+        // Normalize due.deadlineDate to string
+        ...(deadlineDate !== undefined && challengeData.due ? {
+          due: { ...challengeData.due, deadlineDate },
+        } : {}),
       };
 
-      // Fetch group if it's a group challenge
-      let group: any = null;
-      if (challenge.groupId) {
-        const groupDoc = await getDoc(doc(db, 'groups', challenge.groupId));
-        if (groupDoc.exists()) {
-          group = {
-            id: groupDoc.id,
-            ...groupDoc.data(),
-          };
-        }
-      }
-
-      // Fetch challenge members
+      // Fetch group, challenge members, and check-ins in parallel
       const membersQuery = query(
         collection(db, 'challengeMembers'),
         where('challengeId', '==', challengeId)
       );
-      const membersSnapshot = await getDocs(membersQuery);
-      const challengeMembers: any[] = membersSnapshot.docs.map(d => ({
-        id: d.id,
-        ...d.data(),
-      }));
-
-      // Use group.memberIds for group challenges (source of truth for who's in the challenge)
-      // Fallback to challengeMembers for solo or legacy challenges
-      const memberIdsForProfiles: string[] = group?.memberIds?.length
-        ? group.memberIds
-        : challengeMembers.map((m: any) => m.userId);
-
-      // Fetch member profiles for actual group/challenge members
-      const memberProfiles: Record<string, any> = {};
-      for (const userId of memberIdsForProfiles) {
-        const userDoc = await getDoc(doc(db, 'users', userId));
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          memberProfiles[userId] = {
-            name: userData.displayName || userData.email || 'Unknown',
-            avatarUri: userData.photoURL || null,
-          };
-        }
-      }
-
-      // Fetch recent check-ins (last 30 days)
       const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
       const checkInsQuery = query(
         collection(db, 'checkIns'),
@@ -514,36 +532,71 @@ export class ChallengeService {
         where('createdAt', '>=', thirtyDaysAgo),
         orderBy('createdAt', 'desc')
       );
-      const checkInsSnapshot = await getDocs(checkInsQuery);
+      const groupPromise = challenge.groupId
+        ? getDoc(doc(db, 'groups', challenge.groupId))
+        : Promise.resolve(null);
+
+      const [membersSnapshot, checkInsSnapshot, groupSnap] = await Promise.all([
+        getDocs(membersQuery),
+        getDocs(checkInsQuery),
+        groupPromise,
+      ]);
+
+      const challengeMembers: any[] = membersSnapshot.docs.map(d => ({
+        id: d.id,
+        ...d.data(),
+      }));
+
       const allCheckIns: any[] = checkInsSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
       }));
 
+      // Merge challenge member IDs with actual group member IDs so all group members show in status
+      const challengeMemberIds: string[] = challengeMembers.map((m: any) => m.userId);
+      const groupMemberIds: string[] = groupSnap?.data?.()?.memberIds || [];
+      const allMemberIds = Array.from(new Set([...challengeMemberIds, ...groupMemberIds]));
+      const memberIdsForProfiles = allMemberIds;
+
+      const profilesMap = await userCache.getUsers(memberIdsForProfiles);
+      const memberProfiles: Record<string, any> = {};
+      for (const [uid, u] of profilesMap) {
+        memberProfiles[uid] = {
+          name: (u as any).displayName || (u as any).email || 'Unknown',
+          avatarUri: (u as any).photoURL || null,
+        };
+      }
+
       // Filter check-ins for current period and user
       const myRecentCheckIns = allCheckIns.filter((ci: any) => ci.userId === currentUserId);
 
-      // Determine current period check-ins based on cadence and due time
+      // Determine current period check-ins using challenge creator's timezone (same as submission and challengeEval)
       const now = new Date();
+      const adminTz = resolveAdminTimeZone(challenge as any);
+      const dueTimeLocal = challenge.due?.dueTimeLocal || '23:59';
+      const weekStartsOn = challenge.cadence?.weekStartsOn ?? 0;
       let checkInsForCurrentPeriod: any[] = [];
-      
+
       if (challenge.cadence?.unit === 'daily') {
-        const dueTimeLocal = challenge.due?.dueTimeLocal || '23:59';
-        const currentPeriodKey = dateKeys.getCurrentCheckInPeriod(dueTimeLocal);
+        const currentPeriodKey = challenge.type === 'deadline'
+          ? getAdminZoneDayKey(adminTz, now)
+          : getCurrentPeriodDayKey(adminTz, dueTimeLocal, now);
         checkInsForCurrentPeriod = allCheckIns.filter((ci: any) => {
           return ci.period?.dayKey === currentPeriodKey;
         });
       } else if (challenge.cadence?.unit === 'weekly') {
-        // Get current week's check-ins
-        const currentWeekKey = dateKeys.getWeekKey(now, challenge.cadence.weekStartsOn || 0);
+        const currentWeekKey = getCurrentPeriodWeekKey(adminTz, weekStartsOn, now);
         checkInsForCurrentPeriod = allCheckIns.filter((ci: any) => {
           return ci.period?.weekKey === currentWeekKey;
         });
       }
 
+      const groupData = groupSnap?.data?.() || {};
       return {
         challenge,
-        group: group || { id: 'solo', name: 'Solo Challenge', memberIds: [currentUserId] },
+        group: challenge.groupId
+          ? { id: challenge.groupId, name: groupData.name || 'Group', memberIds: groupMemberIds.length > 0 ? groupMemberIds : memberIdsForProfiles }
+          : { id: 'solo', name: 'Solo Challenge', memberIds: [currentUserId] },
         challengeMembers,
         memberProfiles,
         checkInsForCurrentPeriod,
@@ -552,7 +605,7 @@ export class ChallengeService {
         currentUserId,
       };
     } catch (error) {
-      console.error('Error getting challenge details:', error);
+      if (__DEV__) console.error('Error getting challenge details:', error);
       throw error;
     }
   }

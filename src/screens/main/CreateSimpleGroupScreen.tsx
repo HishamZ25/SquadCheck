@@ -6,7 +6,6 @@ import {
   SafeAreaView,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   Alert,
 } from 'react-native';
 
@@ -58,7 +57,7 @@ export const CreateSimpleGroupScreen: React.FC<CreateSimpleGroupScreenProps> = (
         setFriends(friendsWithSelection);
       }
     } catch (error) {
-      console.error('Error loading friends:', error);
+      if (__DEV__) console.error('Error loading friends:', error);
     } finally {
       setLoadingFriends(false);
     }
@@ -116,7 +115,7 @@ export const CreateSimpleGroupScreen: React.FC<CreateSimpleGroupScreenProps> = (
         [{ text: 'OK' }]
       );
     } catch (error: any) {
-      console.error('Error creating group:', error);
+      if (__DEV__) console.error('Error creating group:', error);
       Alert.alert('Error', error.message || 'Failed to create group. Please try again.');
     }
   };

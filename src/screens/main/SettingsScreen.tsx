@@ -4,7 +4,9 @@ import {
   Text,
   StyleSheet,
   SafeAreaView,
+  ScrollView,
   TouchableOpacity,
+  Switch,
   Alert,
 } from 'react-native';
 import { CommonActions } from '@react-navigation/native';
@@ -12,9 +14,11 @@ import { Button } from '../../components/common/Button';
 import { Avatar } from '../../components/common/Avatar';
 import { Theme } from '../../constants/theme';
 import { AuthService } from '../../services/authService';
+import { GamificationService } from '../../services/gamificationService';
 import { User } from '../../types';
 import { Ionicons } from '@expo/vector-icons';
 import { useColorMode } from '../../theme/ColorModeContext';
+import { useCurrentUser } from '../../contexts/UserContext';
 
 interface SettingsScreenProps {
   navigation: any;
@@ -22,8 +26,9 @@ interface SettingsScreenProps {
 }
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, route }) => {
-  const user: User = route.params?.user;
-  const { colors } = useColorMode();
+  const { user: contextUser } = useCurrentUser();
+  const user: User = contextUser ?? route.params?.user;
+  const { mode, colors, setMode } = useColorMode();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const handleLogout = async () => {
@@ -41,11 +46,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
           onPress: async () => {
             try {
               setIsLoggingOut(true);
-              console.log('Starting logout...');
               
               // Sign out from Firebase
               await AuthService.signOut();
-              console.log('SignOut successful');
               
               // Navigate to root and reset to Login
               // Get parent navigator (root stack)
@@ -58,7 +61,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
               );
               
             } catch (error: any) {
-              console.error('Error logging out:', error);
+              if (__DEV__) console.error('Error logging out:', error);
               setIsLoggingOut(false);
               const errorMessage = error?.message || 'Failed to logout. Please try again.';
               Alert.alert('Error', errorMessage);
@@ -83,7 +86,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
         <View style={styles.headerSpacer} />
       </View>
 
-      <View style={styles.userSection}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <View style={[styles.userSection, { backgroundColor: colors.background }]}>
         <Avatar
           source={user?.photoURL}
           initials={user?.displayName?.charAt(0)}
@@ -92,46 +96,108 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ navigation, rout
         <Text style={[styles.userName, { color: colors.text }]}>{user?.displayName || 'User'}</Text>
         <Text style={[styles.userTitle, { color: colors.textSecondary }]}>{user?.title || 'Accountability Seeker'}</Text>
         <Text style={[styles.userEmail, { color: colors.textSecondary }]}>{user?.email}</Text>
+
+        {/* Level + XP Progress */}
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={() => navigation.navigate('Levels')}
+          style={[styles.levelSection, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '50' }]}
+        >
+          <View style={styles.levelRow}>
+            <Text style={[styles.levelBadge, { color: colors.accent }]}>
+              Lv. {user?.level || 1} — {user?.levelTitle || 'Rookie'}
+            </Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+          </View>
+          <View style={styles.xpProgressRow}>
+            <View style={[styles.xpProgressBg, { backgroundColor: colors.accent + '15' }]}>
+              <View
+                style={[
+                  styles.xpProgressFill,
+                  {
+                    backgroundColor: colors.accent,
+                    width: `${Math.min(100, ((user?.xp || 0) / GamificationService.getNextLevelXP(user?.level || 1)) * 100)}%`,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={[styles.xpLabel, { color: colors.textSecondary }]}>
+              {user?.xp || 0}/{GamificationService.getNextLevelXP(user?.level || 1)} XP
+            </Text>
+          </View>
+          <View style={styles.statsRow}>
+            <Text style={[styles.statText, { color: colors.textSecondary }]}>
+              {user?.totalCheckIns || 0} check-ins
+            </Text>
+            <Text style={[styles.statText, { color: colors.textSecondary }]}>
+              {user?.longestStreak || 0} best streak
+            </Text>
+          </View>
+        </TouchableOpacity>
       </View>
 
-      <View style={[styles.settingsSection, { backgroundColor: colors.card }]}>
-        <TouchableOpacity style={[styles.settingItem, { backgroundColor: colors.card, borderWidth: 2, borderColor: colors.accent, borderBottomColor: colors.dividerLineTodo + '40' }]}>
+      <View style={styles.settingsSection}>
+        <TouchableOpacity
+          style={[styles.settingItem, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '50' }]}
+          onPress={() => navigation.navigate('Profile')}
+        >
           <Text style={[styles.settingText, { color: colors.text }]}>Edit Profile</Text>
           <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingItem, { backgroundColor: colors.card, borderWidth: 2, borderColor: colors.accent, borderBottomColor: colors.dividerLineTodo + '40' }]}>
+        <TouchableOpacity
+          style={[styles.settingItem, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '50' }]}
+          onPress={() => navigation.navigate('Notifications')}
+        >
           <Text style={[styles.settingText, { color: colors.text }]}>Notifications</Text>
           <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingItem, { backgroundColor: colors.card, borderWidth: 2, borderColor: colors.accent, borderBottomColor: colors.dividerLineTodo + '40' }]}>
+        <TouchableOpacity
+          style={[styles.settingItem, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '50' }]}
+          onPress={() => navigation.navigate('Privacy')}
+        >
           <Text style={[styles.settingText, { color: colors.text }]}>Privacy</Text>
           <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.settingItem, { backgroundColor: colors.card, borderWidth: 2, borderColor: colors.accent, borderBottomColor: colors.dividerLineTodo + '40' }]}
+        <TouchableOpacity
+          style={[styles.settingItem, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '50' }]}
           onPress={() => navigation.navigate('Onboarding', { fromSettings: true })}
         >
           <Text style={[styles.settingText, { color: colors.text }]}>View Tutorial</Text>
           <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingItem, { backgroundColor: colors.card, borderWidth: 2, borderColor: colors.accent, borderBottomColor: colors.dividerLineTodo + '40' }]}>
+        <TouchableOpacity
+          style={[styles.settingItem, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '50' }]}
+          onPress={() => navigation.navigate('HelpSupport')}
+        >
           <Text style={[styles.settingText, { color: colors.text }]}>Help & Support</Text>
           <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
+
+        <View style={[styles.settingItem, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '50' }]}>
+          <Ionicons name={mode === 'dark' ? 'moon' : 'sunny'} size={20} color={colors.accent} />
+          <Text style={[styles.settingText, { color: colors.text }]}>Dark Mode</Text>
+          <Switch
+            value={mode === 'dark'}
+            onValueChange={(val) => setMode(val ? 'dark' : 'light')}
+            trackColor={{ false: '#D1D5DB', true: colors.accent + '80' }}
+            thumbColor={mode === 'dark' ? colors.accent : '#F9FAFB'}
+          />
+        </View>
       </View>
 
-      {/* Logout Button */}
       <View style={styles.logoutSection}>
         <Button
           title="Logout"
           onPress={handleLogout}
           variant="outline"
+          fullWidth
           style={styles.logoutButton}
           textStyle={styles.logoutButtonText}
           disabled={isLoggingOut}
           loading={isLoggingOut}
         />
       </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -172,7 +238,7 @@ const styles = StyleSheet.create({
   userSection: {
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingTop: 4,
   },
   
   userName: {
@@ -196,12 +262,58 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#999999',
   },
-  settingsSection: {
-    flex: 1,
-    paddingHorizontal: 20,
-    marginTop: Theme.spacing.lg,
+  levelSection: {
+    width: '100%',
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 8,
   },
-  
+  levelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  levelBadge: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  xpProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  xpProgressBg: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  xpProgressFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  xpLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 10,
+  },
+  statText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  scrollContent: {
+    paddingBottom: 20,
+  },
+  settingsSection: {
+    paddingHorizontal: 20,
+    marginTop: Theme.spacing.md,
+  },
   settingItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -209,7 +321,7 @@ const styles = StyleSheet.create({
     padding: Theme.spacing.md,
     marginBottom: Theme.spacing.sm,
     gap: Theme.spacing.md,
-    borderWidth: 2,
+    borderWidth: 1,
   },
   
   settingText: {
@@ -219,14 +331,14 @@ const styles = StyleSheet.create({
   },
   
   logoutSection: {
-    padding: Theme.layout.screenPadding,
+    paddingHorizontal: 20,
+    paddingTop: Theme.spacing.lg,
     paddingBottom: Theme.spacing.xl,
   },
-  
   logoutButton: {
+    width: '100%',
     borderColor: Theme.colors.error,
   },
-  
   logoutButtonText: {
     color: Theme.colors.error,
   },

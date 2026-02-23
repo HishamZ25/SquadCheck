@@ -128,7 +128,7 @@ export function getAdminZoneDayKey(adminTimeZone: string, now: Date = new Date()
  */
 export function getAdminZoneWeekKey(
   adminTimeZone: string,
-  weekStartsOn: number = 1,
+  weekStartsOn: number = 0,
   now: Date = new Date()
 ): string {
   const wc = getWallClockInZone(now, adminTimeZone);
@@ -175,7 +175,7 @@ export function computeWeeklyDueMomentUtc(
   adminTimeZone: string,
   weekKey: string,
   dueTimeLocal: string,
-  weekStartsOn: number = 1
+  weekStartsOn: number = 0
 ): Date {
   // The week ends on the day before the next week starts.
   // So if weekStartsOn=1 (Monday), the week ends on Sunday.
@@ -199,10 +199,24 @@ export function computeWeeklyDueMomentUtc(
  */
 export function computeDeadlineMomentUtc(
   adminTimeZone: string,
-  deadlineDate: string,
+  deadlineDate: string | any,
   dueTimeLocal: string = '23:59'
 ): Date {
-  return wallClockToUtc(deadlineDate, dueTimeLocal, adminTimeZone);
+  // Guard: deadlineDate may arrive as a Firestore Timestamp or Date object
+  let dateStr: string;
+  if (typeof deadlineDate === 'string') {
+    dateStr = deadlineDate;
+  } else if (deadlineDate?.toDate) {
+    // Firestore Timestamp
+    const d = deadlineDate.toDate() as Date;
+    dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  } else if (deadlineDate instanceof Date) {
+    dateStr = `${deadlineDate.getFullYear()}-${String(deadlineDate.getMonth() + 1).padStart(2, '0')}-${String(deadlineDate.getDate()).padStart(2, '0')}`;
+  } else {
+    // Fallback: use a far-future date to avoid crashes
+    dateStr = '2099-12-31';
+  }
+  return wallClockToUtc(dateStr, dueTimeLocal, adminTimeZone);
 }
 
 /**
@@ -231,7 +245,7 @@ export function getCurrentPeriodDayKey(
  */
 export function getCurrentPeriodWeekKey(
   adminTimeZone: string,
-  weekStartsOn: number = 1,
+  weekStartsOn: number = 0,
   now: Date = new Date()
 ): string {
   return getAdminZoneWeekKey(adminTimeZone, weekStartsOn, now);
@@ -245,7 +259,7 @@ export function computeNextDueAtUtc(
   adminTimeZone: string,
   dueTimeLocal: string = '23:59',
   cadenceUnit: 'daily' | 'weekly',
-  weekStartsOn: number = 1,
+  weekStartsOn: number = 0,
   now: Date = new Date()
 ): number {
   if (cadenceUnit === 'daily') {

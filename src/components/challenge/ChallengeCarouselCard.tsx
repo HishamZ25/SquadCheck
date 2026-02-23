@@ -4,8 +4,8 @@ import { Challenge } from '../../types';
 import { dateKeys } from '../../utils/dateKeys';
 import { CountdownTimer } from '../common/CountdownTimer';
 import { Avatar } from '../common/Avatar';
-import { Check } from 'lucide-react-native';
 import { useColorMode } from '../../theme/ColorModeContext';
+import { Flame, Star } from 'lucide-react-native';
 
 export interface GroupMemberAvatar {
   id: string;
@@ -20,6 +20,7 @@ interface ChallengeCarouselCardProps {
   isCompleted: boolean;
   status: string;
   isEliminated?: boolean;
+  streak?: number;
   onPress: () => void;
   onCheckInPress: (e: any) => void;
 }
@@ -34,14 +35,17 @@ export const ChallengeCarouselCard: React.FC<ChallengeCarouselCardProps> = ({
   isCompleted,
   status,
   isEliminated = false,
+  streak = 0,
   onPress,
   onCheckInPress,
 }) => {
   const { colors } = useColorMode();
   const dueTimeLocal = challenge.due?.dueTimeLocal || '23:59';
   const isDaily = challenge.cadence?.unit === 'daily';
+  // Always show countdown to the DAILY due time, not the deadline date.
+  // Deadline challenges still require daily submissions — the deadline is just when the challenge ends.
   const countdownTarget = isDaily && !isCompleted && !isEliminated
-    ? dateKeys.getNextDueDate(dueTimeLocal, challenge.due?.deadlineDate, (challenge as any).type)
+    ? dateKeys.getNextDueDate(dueTimeLocal, undefined, undefined, (challenge as any).adminTimeZone)
     : null;
   const showLiveCountdown = countdownTarget && countdownTarget.getTime() > Date.now();
 
@@ -106,6 +110,31 @@ export const ChallengeCarouselCard: React.FC<ChallengeCarouselCardProps> = ({
         ) : null}
       </View>
 
+      {/* Streak indicator */}
+      {streak > 0 && (
+        <View style={styles.streakRow}>
+          {streak >= 3 ? (
+            <Flame
+              size={streak >= 30 ? 18 : streak >= 7 ? 16 : 14}
+              color={streak >= 30 ? '#FF4500' : streak >= 7 ? '#FF6B35' : '#FFA500'}
+              fill={streak >= 30 ? '#FF4500' : streak >= 7 ? '#FF6B35' : '#FFA500'}
+            />
+          ) : (
+            <Star size={14} color="#FFA500" fill="#FFA500" />
+          )}
+          <Text
+            style={[
+              styles.streakLabel,
+              {
+                color: streak >= 30 ? '#FF4500' : streak >= 7 ? '#FF6B35' : '#FFA500',
+              },
+            ]}
+          >
+            {streak} {isDaily ? 'day' : 'week'} streak
+          </Text>
+        </View>
+      )}
+
       {/* Timer or due label */}
       <View style={[styles.middle, isCompleted && styles.middleCompleted]}>
         {showLiveCountdown ? (
@@ -145,7 +174,7 @@ export const ChallengeCarouselCard: React.FC<ChallengeCarouselCardProps> = ({
   );
 };
 
-const CARD_MIN_HEIGHT = 160;
+const CARD_MIN_HEIGHT = 148;
 
 const styles = StyleSheet.create({
   card: {
@@ -154,17 +183,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF9F5',
     borderRadius: 12,
     borderWidth: 2,
-    padding: 14,
+    padding: 13,
     justifyContent: 'space-between',
   },
   cardCompleted: {
-    minHeight: 120,
+    minHeight: 114,
   },
   topRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   titleBlock: {
     flex: 1,
@@ -197,13 +226,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  streakRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 4,
+  },
+  streakLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
   middle: {
-    marginBottom: 10,
-    minHeight: 28,
+    marginBottom: 8,
+    minHeight: 26,
     justifyContent: 'center',
   },
   middleCompleted: {
-    marginBottom: 4,
+    marginBottom: 3,
     minHeight: 0,
   },
   dueLabel: {
@@ -215,7 +254,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FF6B35',
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderRadius: 10,
     gap: 8,
   },

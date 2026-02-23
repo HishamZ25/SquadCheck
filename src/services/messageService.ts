@@ -1,15 +1,20 @@
-import { 
-  collection, 
-  doc, 
-  addDoc, 
-  getDocs, 
-  query, 
-  where, 
-  orderBy, 
+import {
+  collection,
+  doc,
+  addDoc,
+  getDocs,
+  getDoc,
+  updateDoc,
+  query,
+  where,
+  orderBy,
   onSnapshot,
   serverTimestamp,
   limit,
-  deleteDoc
+  deleteDoc,
+  arrayUnion,
+  arrayRemove,
+  increment,
 } from 'firebase/firestore';
 import { 
   ref, 
@@ -17,6 +22,8 @@ import {
   getDownloadURL 
 } from 'firebase/storage';
 import { db, storage } from './firebase';
+import { GamificationService } from './gamificationService';
+import { XP_VALUES } from '../constants/gamification';
 
 const SYSTEM_USER_ID = 'system-missed';
 const SYSTEM_USER_NAME = 'SquadCheck';
@@ -36,6 +43,9 @@ export interface GroupChatMessage {
   challengeName?: string;
   upvotes?: number;
   downvotes?: number;
+  upvotedBy?: string[];
+  downvotedBy?: string[];
+  streak?: number;
 }
 
 export class MessageService {
@@ -53,13 +63,17 @@ export class MessageService {
         userName,
         text,
         type: 'text' as const,
+        upvotes: 0,
+        downvotes: 0,
+        upvotedBy: [],
+        downvotedBy: [],
         timestamp: serverTimestamp(),
       };
 
       const docRef = await addDoc(collection(db, 'messages'), messageData);
       return docRef.id;
     } catch (error) {
-      console.error('Error sending text message:', error);
+      if (__DEV__) console.error('Error sending text message:', error);
       throw error;
     }
   }
@@ -84,7 +98,7 @@ export class MessageService {
       const docRef = await addDoc(collection(db, 'messages'), messageData);
       return docRef.id;
     } catch (error) {
-      console.error('Error sending elimination message:', error);
+      if (__DEV__) console.error('Error sending elimination message:', error);
       throw error;
     }
   }
@@ -109,7 +123,7 @@ export class MessageService {
       const docRef = await addDoc(collection(db, 'messages'), messageData);
       return docRef.id;
     } catch (error) {
-      console.error('Error sending winner message:', error);
+      if (__DEV__) console.error('Error sending winner message:', error);
       throw error;
     }
   }
@@ -149,7 +163,7 @@ export class MessageService {
       const docRef = await addDoc(collection(db, 'messages'), messageData);
       return docRef.id;
     } catch (error) {
-      console.error('Error sending image message:', error);
+      if (__DEV__) console.error('Error sending image message:', error);
       throw error;
     }
   }
@@ -181,10 +195,13 @@ export class MessageService {
           challengeName: data.challengeName,
           upvotes: data.upvotes || 0,
           downvotes: data.downvotes || 0,
+          upvotedBy: data.upvotedBy || [],
+          downvotedBy: data.downvotedBy || [],
+          streak: data.streak || undefined,
         } as GroupChatMessage;
       });
     } catch (error) {
-      console.error('Error getting group messages:', error);
+      if (__DEV__) console.error('Error getting group messages:', error);
       return [];
     }
   }
@@ -221,17 +238,85 @@ export class MessageService {
             challengeName: data.challengeName,
             upvotes: data.upvotes || 0,
             downvotes: data.downvotes || 0,
+            upvotedBy: data.upvotedBy || [],
+            downvotedBy: data.downvotedBy || [],
           } as GroupChatMessage;
         });
         callback(messages);
       },
       (error) => {
-        if (__DEV__) {
-          console.warn('Firestore Listen (messages) transport error, will retry:', error?.code || error?.message);
-        }
+        if (__DEV__) console.warn('Firestore Listen (messages) transport error, will retry:', error?.code || error?.message);
         callback([]);
       }
     );
+  }
+
+  /**
+   * Toggle upvote on a message. Awards +3 XP to author on new upvote.
+   */
+  static async toggleUpvote(
+    messageId: string,
+    voterId: string,
+    messageAuthorId: string,
+  ): Promise<void> {
+    const msgRef = doc(db, 'messages', messageId);
+    const msgSnap = await getDoc(msgRef);
+    if (!msgSnap.exists()) return;
+
+    const data = msgSnap.data();
+    const upvotedBy: string[] = data.upvotedBy || [];
+    const alreadyUpvoted = upvotedBy.includes(voterId);
+
+    if (alreadyUpvoted) {
+      // Remove upvote
+      await updateDoc(msgRef, {
+        upvotedBy: arrayRemove(voterId),
+        upvotes: increment(-1),
+      });
+    } else {
+      // Add upvote + award XP in parallel
+      const ops: Promise<any>[] = [
+        updateDoc(msgRef, {
+          upvotedBy: arrayUnion(voterId),
+          upvotes: increment(1),
+        }),
+      ];
+      if (voterId !== messageAuthorId) {
+        ops.push(
+          GamificationService.updateUserXPOnly(messageAuthorId, XP_VALUES.UPVOTE_RECEIVED)
+            .catch(e => { if (__DEV__) console.error('Upvote XP award error:', e); })
+        );
+      }
+      await Promise.all(ops);
+    }
+  }
+
+  /**
+   * Toggle downvote on a message. No XP implications.
+   */
+  static async toggleDownvote(
+    messageId: string,
+    voterId: string,
+  ): Promise<void> {
+    const msgRef = doc(db, 'messages', messageId);
+    const msgSnap = await getDoc(msgRef);
+    if (!msgSnap.exists()) return;
+
+    const data = msgSnap.data();
+    const downvotedBy: string[] = data.downvotedBy || [];
+    const alreadyDownvoted = downvotedBy.includes(voterId);
+
+    if (alreadyDownvoted) {
+      await updateDoc(msgRef, {
+        downvotedBy: arrayRemove(voterId),
+        downvotes: increment(-1),
+      });
+    } else {
+      await updateDoc(msgRef, {
+        downvotedBy: arrayUnion(voterId),
+        downvotes: increment(1),
+      });
+    }
   }
 
   // Delete a message (only for message sender or group admin)
@@ -240,7 +325,7 @@ export class MessageService {
       // Note: You might want to add security rules to only allow deletion by sender
       await deleteDoc(doc(db, 'messages', messageId));
     } catch (error) {
-      console.error('Error deleting message:', error);
+      if (__DEV__) console.error('Error deleting message:', error);
       throw error;
     }
   }
@@ -256,7 +341,7 @@ export class MessageService {
       const querySnapshot = await getDocs(messagesQuery);
       return querySnapshot.size;
     } catch (error) {
-      console.error('Error getting message count:', error);
+      if (__DEV__) console.error('Error getting message count:', error);
       return 0;
     }
   }
@@ -264,21 +349,26 @@ export class MessageService {
   // Upload image to Firebase Storage and return download URL
   static async uploadImage(imageUri: string): Promise<string> {
     try {
-      // Convert image URI to blob
+      // Use fetch to convert URI to blob (stable on modern Expo/RN — avoids XHR native crashes)
       const response = await fetch(imageUri);
       const blob = await response.blob();
-      
+
       // Generate unique filename
       const filename = `checkin_images/${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
       const storageRef = ref(storage, filename);
-      
+
       // Upload image to Firebase Storage
       await uploadBytes(storageRef, blob);
+
+      // Close the blob to free native memory
+      if (typeof (blob as any).close === 'function') {
+        (blob as any).close();
+      }
+
       const imageUrl = await getDownloadURL(storageRef);
-      
       return imageUrl;
     } catch (error) {
-      console.error('Error uploading image:', error);
+      if (__DEV__) console.error('Error uploading image:', error);
       throw error;
     }
   }
@@ -290,19 +380,11 @@ export class MessageService {
     userName: string,
     caption: string,
     imageUrl?: string | null,
-    challengeTitle?: string
+    challengeTitle?: string,
+    streak?: number,
   ): Promise<string> {
     try {
-      console.log('📤 sendCheckInMessage called with:', {
-        groupId,
-        userId,
-        userName,
-        caption,
-        imageUrl: imageUrl ? `${imageUrl.substring(0, 50)}...` : null,
-        challengeTitle
-      });
-      
-      const messageData = {
+      const messageData: Record<string, any> = {
         groupId,
         userId,
         userName,
@@ -313,15 +395,18 @@ export class MessageService {
         challengeTitle: challengeTitle || '',
         upvotes: 0,
         downvotes: 0,
+        upvotedBy: [],
+        downvotedBy: [],
         timestamp: serverTimestamp(),
       };
+      if (streak && streak > 0) {
+        messageData.streak = streak;
+      }
 
-      console.log('📝 Creating message document in Firestore...');
       const docRef = await addDoc(collection(db, 'messages'), messageData);
-      console.log('✅ Check-in message created with ID:', docRef.id);
       return docRef.id;
     } catch (error) {
-      console.error('❌ Error sending check-in message:', error);
+      if (__DEV__) console.error('❌ Error sending check-in message:', error);
       throw error;
     }
   }

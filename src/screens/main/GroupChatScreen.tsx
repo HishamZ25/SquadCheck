@@ -9,33 +9,29 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { CheckInModal } from '../../components/common/CheckInModal';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { GroupHeader, ChatTab, LeaderboardTab, SettingsTab } from '../../components/group';
 import { GroupService } from '../../services/groupService';
-import { AuthService } from '../../services/authService';
 import { MessageService, GroupChatMessage } from '../../services/messageService';
 import { ChallengeService } from '../../services/challengeService';
-import { processMissedCheckIns, processProgressionIntervals } from '../../services/missedCheckInService';
 import { Group, User, Challenge } from '../../types';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../../services/firebase';
 import { useColorMode } from '../../theme/ColorModeContext';
+import { useCurrentUser } from '../../contexts/UserContext';
+import { userCache } from '../../services/userCache';
 
 type GroupChatScreenProps = StackScreenProps<any, 'GroupChat'>;
 
 export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, route }) => {
   const { colors } = useColorMode();
+  const { user } = useCurrentUser();
   const { groupId } = route.params || {};
   const [group, setGroup] = useState<Group | null>(null);
-  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'chat' | 'leaderboard' | 'settings'>('chat');
   const [messageText, setMessageText] = useState('');
   const [messages, setMessages] = useState<GroupChatMessage[]>([]);
-  const [showCheckInModal, setShowCheckInModal] = useState(false);
   const [groupMembers, setGroupMembers] = useState<User[]>([]);
   const [groupChallenges, setGroupChallenges] = useState<Challenge[]>([]);
 
@@ -56,17 +52,10 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
     try {
       setLoading(true);
 
-      // Load all data in parallel (messages are the single source for chat - we no longer merge check-ins to avoid duplicates)
-      const [groupData, currentUser, realMessages] = await Promise.all([
-        GroupService.getGroup(groupId),
-        AuthService.getCurrentUser(),
-        MessageService.getGroupMessages(groupId),
-      ]);
-
+      const groupData = await GroupService.getGroup(groupId);
       setGroup(groupData);
-      setUser(currentUser);
 
-      // Load group members and challenges (for leaderboard/settings; leaderboard uses messages with type 'checkin')
+      // Load group members and challenges in parallel
       if (groupData) {
         const [members, challenges] = await Promise.all([
           loadGroupMembers(groupData),
@@ -74,29 +63,10 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
         ]);
         setGroupMembers(members);
         setGroupChallenges(challenges);
-        // Defer automation so UI paints first; then run missed check-ins and progression
-        const runAutomation = () => {
-          processMissedCheckIns(groupId, challenges, members).catch((err) =>
-            __DEV__ && console.warn('Missed check-in automation:', err)
-          );
-          processProgressionIntervals(groupId, challenges).catch((err) =>
-            __DEV__ && console.warn('Progression interval automation:', err)
-          );
-        };
-        if (typeof requestAnimationFrame !== 'undefined') {
-          requestAnimationFrame(() => setTimeout(runAutomation, 0));
-        } else {
-          setTimeout(runAutomation, 0);
-        }
       }
-
-      // Chat shows only messages from Firestore (each group check-in already sends one message via sendCheckInMessage)
-      const sortedMessages = [...realMessages].sort(
-        (a, b) => (b.timestamp?.getTime?.() || 0) - (a.timestamp?.getTime?.() || 0)
-      );
-      setMessages(sortedMessages);
+      // Messages are provided by the onSnapshot listener — no need for a separate fetch
     } catch (error) {
-      console.error('Error loading group data:', error);
+      if (__DEV__) console.error('Error loading group data:', error);
       Alert.alert('Error', 'Failed to load group data');
     } finally {
       setLoading(false);
@@ -105,16 +75,10 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
 
   const loadGroupMembers = async (groupData: Group): Promise<User[]> => {
     try {
-      const memberPromises = groupData.memberIds.map((memberId) =>
-        getDoc(doc(db, 'users', memberId))
-          .then((userDoc) => (userDoc.exists() ? (userDoc.data() as User) : null))
-          .catch(() => null)
-      );
-
-      const members = (await Promise.all(memberPromises)).filter((m): m is User => m !== null);
-      return members;
+      const memberMap = await userCache.getUsers(groupData.memberIds);
+      return Array.from(memberMap.values());
     } catch (error) {
-      console.error('Error loading group members:', error);
+      if (__DEV__) console.error('Error loading group members:', error);
       return [];
     }
   };
@@ -130,11 +94,9 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
       if (challengeIdsFromGroup?.length) {
         const existingIds = new Set(byGroupId.map((c) => c.id));
         const missingIds = challengeIdsFromGroup.filter((id) => id && !existingIds.has(id));
-        const extra: Challenge[] = [];
-        for (const id of missingIds) {
-          const ch = await ChallengeService.getChallenge(id);
-          if (ch) extra.push(ch);
-        }
+        const extra = (
+          await Promise.all(missingIds.map((id) => ChallengeService.getChallenge(id)))
+        ).filter((ch): ch is Challenge => ch !== null);
         const merged = [...byGroupId];
         for (const ch of extra) {
           if (!merged.some((c) => c.id === ch.id)) merged.push(ch);
@@ -144,7 +106,7 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
       }
       return byGroupId;
     } catch (error) {
-      console.error('Error loading group challenges:', error);
+      if (__DEV__) console.error('Error loading group challenges:', error);
       return [];
     }
   };
@@ -156,17 +118,29 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
       await MessageService.sendTextMessage(groupId, user.id, user.displayName, messageText.trim());
       setMessageText('');
     } catch (error) {
-      console.error('Error sending message:', error);
+      if (__DEV__) console.error('Error sending message:', error);
       Alert.alert('Error', 'Failed to send message. Please try again.');
     }
   };
 
   const handleUpvote = async (messageId: string) => {
-    Alert.alert('Success!', 'Upvote functionality will be implemented soon!');
+    if (!user?.id) return;
+    const msg = messages.find(m => m.id === messageId);
+    if (!msg) return;
+    try {
+      await MessageService.toggleUpvote(messageId, user.id, msg.userId);
+    } catch (e) {
+      if (__DEV__) console.error('Upvote error:', e);
+    }
   };
 
-  const handleDownvote = async (messageId: string, reason: string) => {
-    Alert.alert('Disputed!', `Reason: ${reason}\n\nDownvote functionality will be implemented soon!`);
+  const handleDownvote = async (messageId: string, _reason: string) => {
+    if (!user?.id) return;
+    try {
+      await MessageService.toggleDownvote(messageId, user.id);
+    } catch (e) {
+      if (__DEV__) console.error('Downvote error:', e);
+    }
   };
 
   const handleAIJudge = async (messageId: string) => {
@@ -178,6 +152,29 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
       challengeId: challenge.id,
       currentUserId: user?.id || '',
     });
+  };
+
+  const handleLeaveGroup = () => {
+    if (!group || !user?.id) return;
+    Alert.alert(
+      'Leave Group',
+      'Are you sure you want to leave this group? You will be removed from all active challenges in this group.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await GroupService.removeMember(group.id, user.id);
+              navigation.goBack();
+            } catch (e: any) {
+              Alert.alert('Error', e?.message || 'Failed to leave group');
+            }
+          },
+        },
+      ],
+    );
   };
 
   if (loading) {
@@ -215,12 +212,13 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
           />
         );
       case 'leaderboard':
-        return <LeaderboardTab members={groupMembers} messages={messages} />;
+        return <LeaderboardTab members={groupMembers} messages={messages} currentUserId={user?.id} groupId={groupId} />;
       case 'settings':
         return (
           <SettingsTab
             description={(group as any)?.description || null}
             members={groupMembers}
+            groupMembers={groupMembers}
             challenges={groupChallenges}
             onChallengePress={handleChallengePress}
             onInvitePress={() =>
@@ -229,6 +227,7 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
                 groupName: group.name,
               })
             }
+            onLeaveGroup={handleLeaveGroup}
           />
         );
     }
@@ -250,16 +249,6 @@ export const GroupChatScreen: React.FC<GroupChatScreenProps> = ({ navigation, ro
         {renderTabContent()}
       </KeyboardAvoidingView>
 
-      <CheckInModal
-        visible={showCheckInModal}
-        onClose={() => setShowCheckInModal(false)}
-        group={group}
-        onSubmit={async (caption: string, imageUri: string | null) => {
-          // Handle check-in submission
-          setShowCheckInModal(false);
-          Alert.alert('Success', 'Check-in submitted!');
-        }}
-      />
     </SafeAreaView>
   );
 };

@@ -31,11 +31,8 @@ export const Avatar: React.FC<AvatarProps> = ({
 }) => {
   const avatarSize = Theme.layout.avatarSize[size];
   const fontSize = size === 'xl' ? 32 : size === 'lg' ? 24 : size === 'md' ? 18 : 14;
-  
-
 
   if (source) {
-    console.log('Avatar: Using source:', source.substring(0, 50) + '...');
     const imageComponent = (
       <Image
         source={{ uri: source }}
@@ -44,11 +41,9 @@ export const Avatar: React.FC<AvatarProps> = ({
           { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 },
           style as ImageStyle,
         ]}
-        onError={(error) => console.error('Avatar source image error:', error)}
-        onLoad={() => console.log('Avatar source image loaded successfully')}
       />
     );
-    
+
     return onPress ? (
       <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
         {imageComponent}
@@ -58,13 +53,10 @@ export const Avatar: React.FC<AvatarProps> = ({
 
   // Generate Dicebear avatar if no custom photo and we have initials
   if (initials) {
-    console.log('Generating Dicebear avatar for:', initials, 'size:', avatarSize);
     const dicebearUrl = DicebearService.generateAvatarUrl(initials, avatarSize);
-    console.log('Dicebear URL:', dicebearUrl);
-    
+
     // If Dicebear returns empty string, use fallback UI
     if (!dicebearUrl) {
-      console.log('Using fallback UI for avatar');
       const fallbackComponent = (
         <View
           style={[
@@ -78,14 +70,14 @@ export const Avatar: React.FC<AvatarProps> = ({
           </Text>
         </View>
       );
-      
+
       return onPress ? (
         <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
           {fallbackComponent}
         </TouchableOpacity>
       ) : fallbackComponent;
     }
-    
+
     // Use Dicebear PNG URL
     return (
       <Image
@@ -97,12 +89,6 @@ export const Avatar: React.FC<AvatarProps> = ({
         ]}
         resizeMode="cover"
         fadeDuration={0}
-        onError={(error) => {
-          console.error('Avatar image error:', error);
-          // Fallback to initials if image fails to load
-          console.log('Falling back to initials due to image error');
-        }}
-        onLoad={() => console.log('Avatar image loaded successfully')}
       />
     );
   }
@@ -120,7 +106,7 @@ export const Avatar: React.FC<AvatarProps> = ({
       </Text>
     </View>
   );
-  
+
   return onPress ? (
     <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
       {finalFallbackComponent}
@@ -134,11 +120,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  
+
   image: {
     resizeMode: 'cover',
   },
-  
+
   initials: {
     color: Theme.colors.white,
     fontWeight: '700',
@@ -147,4 +133,4 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
   },
-}); 
+});

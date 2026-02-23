@@ -38,6 +38,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             onUpvote={onUpvote}
             onDownvote={onDownvote}
             onAIJudge={onAIJudge}
+            currentUserId={currentUserId}
           />
         )}
         keyExtractor={(item) => item.id}
@@ -46,7 +47,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
         inverted
       />
 
-      <View style={[styles.chatInputContainer, { backgroundColor: colors.background, borderTopColor: colors.dividerLineTodo + '60' }]}>
+      <View style={[styles.chatInputContainer, { backgroundColor: colors.background, borderTopWidth: 0 }]}>
         <TextInput
           style={[styles.messageInput, { backgroundColor: colors.surface, color: colors.text, borderColor: colors.dividerLineTodo + '80' }]}
           placeholder="Message..."

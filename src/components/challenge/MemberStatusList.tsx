@@ -81,16 +81,17 @@ export const MemberStatusList: React.FC<MemberStatusListProps> = ({
   });
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Group Status</Text>
+    <View style={[styles.container, { backgroundColor: colors.surface, borderColor: colors.textSecondary + '30' }]}>
+      <Text style={[styles.title, { color: colors.text }]}>Group Status</Text>
 
       <ScrollView style={[styles.list, listMaxHeight != null && { maxHeight: listMaxHeight }]} showsVerticalScrollIndicator={false}>
-        {sortedMembers.map(userId => {
+        {sortedMembers.map((userId, index) => {
           const profile = memberProfiles[userId] || { name: `User ${userId.slice(0, 4)}` };
           const status = getMemberStatus(userId);
           const statusConfig = getStatusIcon(status);
           const weeklyProgress = getWeeklyProgress(userId);
           const isCurrentUser = userId === currentUserId;
+          const isLast = index === sortedMembers.length - 1;
 
           return (
             <View
@@ -98,6 +99,7 @@ export const MemberStatusList: React.FC<MemberStatusListProps> = ({
               style={[
                 styles.memberRow,
                 isCurrentUser && styles.currentUserRow,
+                !isLast && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.textSecondary + '25' },
               ]}
             >
               {/* Avatar */}
@@ -111,7 +113,7 @@ export const MemberStatusList: React.FC<MemberStatusListProps> = ({
 
               {/* Name */}
               <View style={styles.memberInfo}>
-                <Text style={[styles.memberName, { color: colors.text }, isCurrentUser && { fontWeight: '700', color: colors.text }]}>
+                <Text style={[styles.memberName, { color: colors.text }, isCurrentUser && { fontWeight: '700' }]}>
                   {isCurrentUser ? 'You' : profile.name}
                 </Text>
                 {weeklyProgress && (
@@ -121,10 +123,10 @@ export const MemberStatusList: React.FC<MemberStatusListProps> = ({
 
               {/* Status Icon */}
               <View style={styles.statusContainer}>
-                <Ionicons 
-                  name={statusConfig.icon} 
-                  size={statusConfig.isFilled ? 22 : 20} 
-                  color={statusConfig.color} 
+                <Ionicons
+                  name={statusConfig.icon}
+                  size={statusConfig.isFilled ? 22 : 20}
+                  color={statusConfig.color}
                 />
                 <Text style={[styles.statusText, { color: statusConfig.color }]}>
                   {statusConfig.label}
@@ -157,8 +159,7 @@ const styles = StyleSheet.create({
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
+    paddingVertical: 10,
   },
   currentUserRow: {
     backgroundColor: 'transparent',

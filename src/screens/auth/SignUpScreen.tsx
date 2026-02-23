@@ -10,12 +10,10 @@ import {
   TouchableOpacity,
   ScrollView,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
-import { Theme } from '../../constants/theme';
 import { AuthService } from '../../services/authService';
 
 interface SignUpScreenProps {
@@ -57,6 +55,8 @@ export const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
 
     if (!confirmPassword.trim()) {
       newErrors.confirmPassword = 'Please confirm your password';
+    } else if (password !== confirmPassword) {
+      newErrors.confirmPassword = 'Passwords do not match';
     }
 
     setErrors(newErrors);

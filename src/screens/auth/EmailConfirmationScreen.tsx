@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Alert,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -43,7 +42,7 @@ export const EmailConfirmationScreen: React.FC<EmailConfirmationScreenProps> = (
     try {
       await AuthService.sendEmailVerification();
     } catch (error: any) {
-      console.error('Error sending verification email:', error);
+      if (__DEV__) console.error('Error sending verification email:', error);
     }
   };
 

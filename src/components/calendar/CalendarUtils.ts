@@ -55,10 +55,6 @@ export const getDateString = (date: Date): string => {
   const month = String(date.getMonth() + 1).padStart(2, '0'); // +1 because months are 0-indexed
   const day = String(date.getDate()).padStart(2, '0');
   const dateString = `${year}-${month}-${day}`;
-  // Debug logging for first few calls
-  if (Math.random() < 0.01) { // Log ~1% of calls
-    console.log(`📅 getDateString: ${date.toString()} → ${dateString}`);
-  }
   return dateString;
 };
 

@@ -17,10 +17,11 @@ import { AuthService } from '../../services/authService';
 import { GroupService } from '../../services/groupService';
 import { ChallengeService } from '../../services/challengeService';
 import { CheckInService } from '../../services/checkInService';
+import { GamificationService } from '../../services/gamificationService';
 import { dateKeys } from '../../utils/dateKeys';
-
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const DAY_NAMES = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+import { MONTHS, DAY_NAMES } from '../../constants/calendar';
+import { generateMonthGrid, getColorForCount } from '../../utils/calendarGrid';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 type Challenge = any;
 type CheckIn = any;
@@ -36,6 +37,7 @@ interface FriendProfileScreenProps {
 }
 
 export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ navigation, route }) => {
+  const { colors } = useColorMode();
   const friend = route.params?.user;
   const currentUserFromParams = route.params?.currentUser;
   const [currentUser, setCurrentUser] = useState<User | null>(() => currentUserFromParams ?? null);
@@ -100,7 +102,7 @@ export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ naviga
 
       setFriendCheckInsByDay(byDay);
     } catch (e) {
-      console.error('FriendProfile loadData:', e);
+      if (__DEV__) console.error('FriendProfile loadData:', e);
       setSharedGroups([]);
       setSharedChallenges([]);
       setFriendCheckInsByDay(new Map());
@@ -143,47 +145,15 @@ export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ naviga
     loadData();
   };
 
-  const generateMonthGrid = (): Date[][] => {
-    const year = currentMonth.getFullYear();
-    const month = currentMonth.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const weeks: Date[][] = [];
-    let week: Date[] = [];
-    const startDay = firstDay.getDay();
-    for (let i = 0; i < startDay; i++) {
-      week.push(new Date(year, month, -startDay + i + 1));
-    }
-    for (let day = 1; day <= lastDay.getDate(); day++) {
-      week.push(new Date(year, month, day));
-      if (week.length === 7) {
-        weeks.push(week);
-        week = [];
-      }
-    }
-    while (week.length > 0 && week.length < 7) {
-      week.push(new Date(year, month + 1, week.length - startDay + lastDay.getDate() + 1));
-    }
-    if (week.length > 0) weeks.push(week);
-    return weeks;
-  };
-
   const getCompletionCount = (date: Date): number => {
     const dayKey = dateKeys.getDayKey(date);
     const items = friendCheckInsByDay.get(dayKey) || [];
     return items.filter((i) => i.checkIn.status === 'completed').length;
   };
 
-  const getColorForCount = (count: number): string => {
-    if (count === 0) return '#F0F0F0';
-    if (count === 1) return '#FFE5DC';
-    if (count === 2) return '#FFB088';
-    return '#FF6B35';
-  };
-
   const isToday = (date: Date) => dateKeys.getDayKey(date) === dateKeys.getDayKey(new Date());
   const isCurrentMonth = (date: Date) => date.getMonth() === currentMonth.getMonth();
-  const monthGrid = generateMonthGrid();
+  const monthGrid = generateMonthGrid(currentMonth);
 
   const goPrevMonth = () => setCurrentMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1));
   const goNextMonth = () => setCurrentMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1));
@@ -193,16 +163,16 @@ export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ naviga
 
   if (!friend) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={[styles.header, { backgroundColor: colors.background }]}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={22} color="#000" />
+            <Ionicons name="arrow-back" size={22} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Profile</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
           <View style={styles.placeholder} />
         </View>
         <View style={styles.centered}>
-          <Text style={styles.errorText}>No profile data</Text>
+          <Text style={[styles.errorText, { color: colors.textSecondary }]}>No profile data</Text>
         </View>
       </SafeAreaView>
     );
@@ -210,12 +180,12 @@ export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ naviga
 
   // Show friend immediately (from params); sections load in background
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.header, { backgroundColor: colors.background }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={22} color="#000" />
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Profile</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -233,28 +203,62 @@ export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ naviga
               initials={friend.displayName?.charAt(0)}
               size="xl"
             />
-            <Text style={styles.userName}>{friend.displayName || 'Unknown'}</Text>
-            <Text style={styles.userTitle}>{friend.title || 'Accountability Seeker'}</Text>
+            <Text style={[styles.userName, { color: colors.text }]}>{friend.displayName || 'Unknown'}</Text>
+            <Text style={[styles.userTitle, { color: colors.textSecondary }]}>{friend.title || 'Accountability Seeker'}</Text>
+
+            {/* Level & XP */}
+            <View style={[styles.levelPill, { backgroundColor: colors.surface, borderColor: colors.accent }]}>
+              <Text style={[styles.levelPillText, { color: colors.accent }]}>
+                Lv. {friend.level || 1} — {friend.levelTitle || 'Rookie'}
+              </Text>
+            </View>
+            <View style={[styles.xpBarBg, { backgroundColor: colors.accent + '20' }]}>
+              <View
+                style={[
+                  styles.xpBarFill,
+                  {
+                    backgroundColor: colors.accent,
+                    width: `${Math.min(100, ((friend.xp || 0) / GamificationService.getNextLevelXP(friend.level || 1)) * 100)}%`,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={[styles.xpText, { color: colors.textSecondary }]}>
+              {friend.xp || 0} / {GamificationService.getNextLevelXP(friend.level || 1)} XP
+            </Text>
+
+            {/* Stats row */}
+            <View style={styles.statsRow}>
+              <View style={styles.statItem}>
+                <Text style={[styles.statValue, { color: colors.text }]}>{friend.totalCheckIns || 0}</Text>
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Check-ins</Text>
+              </View>
+              <View style={[styles.statDivider, { backgroundColor: colors.dividerLineTodo + '60' }]} />
+              <View style={styles.statItem}>
+                <Text style={[styles.statValue, { color: colors.text }]}>{friend.longestStreak || 0}</Text>
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Best Streak</Text>
+              </View>
+            </View>
           </View>
 
           {/* Shared groups */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Shared Groups</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Shared Groups</Text>
             {loading ? (
-              <Text style={styles.loadingSection}>Loading…</Text>
+              <Text style={[styles.loadingSection, { color: colors.textSecondary }]}>Loading…</Text>
             ) : sharedGroups.length === 0 ? (
-              <Text style={styles.emptySection}>No groups in common</Text>
+              <Text style={[styles.emptySection, { color: colors.textSecondary }]}>No groups in common</Text>
             ) : (
               sharedGroups.map((group) => (
                 <TouchableOpacity
                   key={group.id}
-                  style={styles.card}
+                  style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.dividerLineTodo + '99' }]}
                   onPress={() => navigation.navigate('GroupChat', { groupId: group.id })}
                   activeOpacity={0.7}
                 >
-                  <Ionicons name="people" size={22} color="#FF6B35" style={styles.cardIcon} />
-                  <Text style={styles.cardTitle} numberOfLines={1}>{group.name}</Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
+                  <Ionicons name="people" size={22} color={colors.accent} style={styles.cardIcon} />
+                  <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>{group.name}</Text>
+                  <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
                 </TouchableOpacity>
               ))
             )}
@@ -262,16 +266,16 @@ export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ naviga
 
           {/* Shared challenges */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Shared Challenges</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Shared Challenges</Text>
             {loading ? (
-              <Text style={styles.loadingSection}>Loading…</Text>
+              <Text style={[styles.loadingSection, { color: colors.textSecondary }]}>Loading…</Text>
             ) : sharedChallenges.length === 0 ? (
-              <Text style={styles.emptySection}>No challenges in common</Text>
+              <Text style={[styles.emptySection, { color: colors.textSecondary }]}>No challenges in common</Text>
             ) : (
               sharedChallenges.map((challenge) => (
                 <TouchableOpacity
                   key={challenge.id}
-                  style={styles.card}
+                  style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.dividerLineTodo + '99' }]}
                   onPress={() =>
                     navigation.navigate('ChallengeDetail', {
                       challengeId: challenge.id,
@@ -280,11 +284,11 @@ export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ naviga
                   }
                   activeOpacity={0.7}
                 >
-                  <Ionicons name="trophy" size={22} color="#FF6B35" style={styles.cardIcon} />
-                  <Text style={styles.cardTitle} numberOfLines={1}>
+                  <Ionicons name="trophy" size={22} color={colors.accent} style={styles.cardIcon} />
+                  <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
                     {challenge.title ?? challenge.name ?? 'Challenge'}
                   </Text>
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
+                  <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
                 </TouchableOpacity>
               ))
             )}
@@ -293,14 +297,14 @@ export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ naviga
           {/* Mini calendar (no title) */}
           <View style={styles.calendarSection}>
             {loading ? (
-              <Text style={styles.loadingSection}>Loading calendar…</Text>
+              <Text style={[styles.loadingSection, { color: colors.textSecondary }]}>Loading calendar…</Text>
             ) : (
               <>
             <View style={styles.monthHeader}>
               <TouchableOpacity onPress={goPrevMonth} style={styles.navButton}>
-                <Ionicons name="chevron-back" size={24} color="#FF6B35" />
+                <Ionicons name="chevron-back" size={24} color={colors.accent} />
               </TouchableOpacity>
-              <Text style={styles.monthText}>
+              <Text style={[styles.monthText, { color: colors.accent }]}>
                 {MONTHS[currentMonth.getMonth()]} {currentMonth.getFullYear()}
               </Text>
               <TouchableOpacity
@@ -311,7 +315,7 @@ export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ naviga
                 <Ionicons
                   name="chevron-forward"
                   size={24}
-                  color={isNextDisabled ? '#CCC' : '#FF6B35'}
+                  color={isNextDisabled ? colors.textSecondary : colors.accent}
                 />
               </TouchableOpacity>
             </View>
@@ -320,7 +324,7 @@ export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ naviga
               <View style={styles.dayNamesRow}>
                 {DAY_NAMES.map((day, i) => (
                   <View key={`dn-${i}`} style={styles.dayNameCell}>
-                    <Text style={styles.dayNameText}>{day}</Text>
+                    <Text style={[styles.dayNameText, { color: colors.textSecondary }]}>{day}</Text>
                   </View>
                 ))}
               </View>
@@ -336,7 +340,7 @@ export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ naviga
                         key={`d-${weekIndex}-${dayIndex}`}
                         style={[
                           styles.dayCell,
-                          { backgroundColor: color },
+                          { backgroundColor: count === 0 ? colors.surface : color },
                           !isCurrentMonth(date) && styles.dayCellOtherMonth,
                           selected && styles.dayCellSelected,
                         ]}
@@ -345,8 +349,9 @@ export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ naviga
                         <Text
                           style={[
                             styles.dayCellText,
-                            !isCurrentMonth(date) && styles.dayCellTextOtherMonth,
-                            count > 0 && styles.dayCellTextWithData,
+                            { color: colors.textSecondary },
+                            !isCurrentMonth(date) && { color: colors.textSecondary + '60' },
+                            count > 0 && { color: '#000' },
                           ]}
                         >
                           {date.getDate()}
@@ -360,39 +365,39 @@ export const FriendProfileScreen: React.FC<FriendProfileScreenProps> = ({ naviga
             </View>
 
             <View style={styles.legend}>
-              <Text style={styles.legendText}>Less</Text>
-              <View style={[styles.legendBox, { backgroundColor: '#F0F0F0' }]} />
+              <Text style={[styles.legendText, { color: colors.textSecondary }]}>Less</Text>
+              <View style={[styles.legendBox, { backgroundColor: colors.surface }]} />
               <View style={[styles.legendBox, { backgroundColor: '#FFE5DC' }]} />
               <View style={[styles.legendBox, { backgroundColor: '#FFB088' }]} />
               <View style={[styles.legendBox, { backgroundColor: '#FF6B35' }]} />
-              <Text style={styles.legendText}>More</Text>
+              <Text style={[styles.legendText, { color: colors.textSecondary }]}>More</Text>
             </View>
 
             {selectedDayKey && (
-              <View style={styles.selectedDaySection}>
+              <View style={[styles.selectedDaySection, { borderTopColor: colors.dividerLineTodo + '99' }]}>
                 <Text style={styles.selectedDayTitle}>
                   {selectedDayKey === dateKeys.getDayKey(new Date())
                     ? 'Today'
                     : dateKeys.parseKey(selectedDayKey).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
                 </Text>
                 {challengesForSelectedDay.length === 0 ? (
-                  <Text style={styles.emptySection}>No check-ins this day</Text>
+                  <Text style={[styles.emptySection, { color: colors.textSecondary }]}>No check-ins this day</Text>
                 ) : (
                   challengesForSelectedDay.map(({ checkIn, challenge }) => {
                     const raw = checkIn.createdAt;
                     const timeStr = !raw ? '' : (raw instanceof Date ? raw : new Date(raw)).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
                     return (
-                      <View key={checkIn.id} style={styles.calendarRow}>
+                      <View key={checkIn.id} style={[styles.calendarRow, { backgroundColor: colors.surface, borderColor: colors.dividerLineTodo + '99' }]}>
                         <Ionicons
                           name={checkIn.status === 'completed' ? 'checkmark-circle' : 'ellipse-outline'}
                           size={20}
-                          color={checkIn.status === 'completed' ? '#4CAF50' : '#999'}
+                          color={checkIn.status === 'completed' ? '#4CAF50' : colors.textSecondary}
                         />
                         <View style={styles.calendarRowText}>
-                          <Text style={styles.calendarRowTitle} numberOfLines={1}>
+                          <Text style={[styles.calendarRowTitle, { color: colors.text }]} numberOfLines={1}>
                             {challenge.title ?? challenge.name ?? 'Challenge'}
                           </Text>
-                          <Text style={styles.calendarRowSub}>
+                          <Text style={[styles.calendarRowSub, { color: colors.textSecondary }]}>
                             {checkIn.status === 'completed' ? 'Completed' : checkIn.status}
                             {timeStr ? ` • ${timeStr}` : ''}
                           </Text>
@@ -468,6 +473,55 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
     color: '#666666',
+    marginBottom: 10,
+  },
+  levelPill: {
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 2,
+    marginBottom: 6,
+  },
+  levelPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  xpBarBg: {
+    width: 120,
+    height: 4,
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  xpBarFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  xpText: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 20,
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  statLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  statDivider: {
+    width: 1,
+    height: 28,
   },
   section: {
     paddingHorizontal: 20,

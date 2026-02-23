@@ -90,7 +90,7 @@ export function getAdminZoneDayKey(timeZone: string, now: Date = new Date()): st
   return `${wc.year}-${String(wc.month).padStart(2, '0')}-${String(wc.day).padStart(2, '0')}`;
 }
 
-export function getAdminZoneWeekKey(timeZone: string, weekStartsOn: number = 1, now: Date = new Date()): string {
+export function getAdminZoneWeekKey(timeZone: string, weekStartsOn: number = 0, now: Date = new Date()): string {
   const wc = getWallClockInZone(now, timeZone);
   let daysToSubtract = wc.dayOfWeek - weekStartsOn;
   if (daysToSubtract < 0) daysToSubtract += 7;
@@ -150,7 +150,7 @@ export function getPreviousPeriodDayKey(timeZone: string, dueTimeLocal: string, 
   return getDayKey(currentDate);
 }
 
-export function getPreviousPeriodWeekKey(timeZone: string, weekStartsOn: number = 1, now: Date = new Date()): string {
+export function getPreviousPeriodWeekKey(timeZone: string, weekStartsOn: number = 0, now: Date = new Date()): string {
   const currentWeekKey = getAdminZoneWeekKey(timeZone, weekStartsOn, now);
   const weekStart = parseKey(currentWeekKey);
   weekStart.setUTCDate(weekStart.getUTCDate() - 7);
@@ -174,50 +174,6 @@ export function hasPeriodDuePassed(
     dueMoment = computeDueMomentUtcForDay(timeZone, periodKey, dueTimeLocal);
   }
   return now.getTime() >= dueMoment.getTime();
-}
-
-// ---------------------------------------------------------------------------
-// Legacy helpers (offset-based — kept for backward compatibility)
-// ---------------------------------------------------------------------------
-
-export function getSubmissionPeriodDayKey(dueTimeLocal: string = '23:59', challengeTimezoneOffset?: number): string {
-  const now = new Date();
-  const offset = challengeTimezoneOffset ?? 0;
-  const [hours, minutes] = dueTimeLocal.split(':').map(Number);
-  const challengeNow = new Date(now.getTime() - offset * 60 * 1000);
-  const y = challengeNow.getUTCFullYear();
-  const m = challengeNow.getUTCMonth();
-  const d = challengeNow.getUTCDate();
-  const todayDueTimeUTC = new Date(Date.UTC(y, m, d, hours, minutes, 0, 0) + offset * 60 * 1000);
-  if (now.getTime() >= todayDueTimeUTC.getTime()) {
-    const tomorrow = new Date(Date.UTC(y, m, d + 1));
-    return getDayKey(tomorrow);
-  }
-  return getDayKey(challengeNow);
-}
-
-export function getPreviousDayKey(dueTimeLocal: string = '23:59', challengeTimezoneOffset?: number): string {
-  const current = getSubmissionPeriodDayKey(dueTimeLocal, challengeTimezoneOffset);
-  const currentDate = parseKey(current);
-  currentDate.setUTCDate(currentDate.getUTCDate() - 1);
-  return getDayKey(currentDate);
-}
-
-export function getWeekKey(date: Date = new Date(), weekStartsOn: number = 1): string {
-  const d = new Date(date);
-  const day = d.getUTCDay();
-  let daysToSubtract = day - weekStartsOn;
-  if (daysToSubtract < 0) daysToSubtract += 7;
-  d.setUTCDate(d.getUTCDate() - daysToSubtract);
-  return getDayKey(d);
-}
-
-export function getPreviousWeekKey(weekStartsOn: number = 1): string {
-  const now = new Date();
-  const currentWeekKey = getWeekKey(now, weekStartsOn);
-  const weekStart = parseKey(currentWeekKey);
-  weekStart.setUTCDate(weekStart.getUTCDate() - 7);
-  return getWeekKey(weekStart, weekStartsOn);
 }
 
 // ---------------------------------------------------------------------------

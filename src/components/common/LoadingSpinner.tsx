@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import { CircleLoader } from './CircleLoader';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 interface LoadingSpinnerProps {
   size?: 'small' | 'large';
@@ -13,10 +14,11 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
   color = '#FF6B35',
   text,
 }) => {
+  const { colors } = useColorMode();
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <CircleLoader size={size} dotColor={color} />
-      {text && <Text style={styles.text}>{text}</Text>}
+      {text && <Text style={[styles.text, { color: colors.textSecondary }]}>{text}</Text>}
     </View>
   );
 };
@@ -26,12 +28,10 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F1F0ED',
   },
   text: {
     marginTop: 12,
     fontSize: 14,
-    color: '#666',
     fontWeight: '500',
   },
 });

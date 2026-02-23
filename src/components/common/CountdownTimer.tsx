@@ -46,7 +46,6 @@ export function CountdownTimer({
 
   const numberSize = size === 'small' ? 20 : size === 'large' ? 28 : 24;
   const labelSize = size === 'small' ? 10 : size === 'large' ? 12 : 11;
-  const numberLineHeight = numberSize * 1.2;
 
   useEffect(() => {
     const tick = () => {
@@ -101,6 +100,11 @@ export function CountdownTimer({
   const showDays = timeLeft.days > 0;
   const showHours = showDays || timeLeft.hours > 0;
 
+  // Render a colon separator that aligns with the number baseline
+  const Separator = () => (
+    <Text style={[styles.sep, { color: numberColor, fontSize: numberSize, lineHeight: numberSize }]}>:</Text>
+  );
+
   return (
     <View style={styles.wrapper}>
       {label ? <Text style={[styles.label, { color: labelColor, fontSize: labelSize }]}>{label}</Text> : null}
@@ -108,40 +112,40 @@ export function CountdownTimer({
         {showDays && (
           <>
             <View style={styles.unit}>
-              <Text style={[styles.number, { color: numberColor, fontSize: numberSize }]}>
+              <Text style={[styles.number, { color: numberColor, fontSize: numberSize, lineHeight: numberSize }]}>
                 {formatSegment(timeLeft.days)}
               </Text>
               {showLabels && <Text style={[styles.unitLabel, { color: labelColor, fontSize: labelSize }]}>DAYS</Text>}
             </View>
-            <View style={[styles.sepWrap, { height: numberLineHeight }]}>
-              <Text style={[styles.sep, { color: numberColor, fontSize: numberSize }]}>:</Text>
+            <View style={styles.sepWrap}>
+              <Separator />
             </View>
           </>
         )}
         {showHours && (
           <>
             <View style={styles.unit}>
-              <Text style={[styles.number, { color: numberColor, fontSize: numberSize }]}>
+              <Text style={[styles.number, { color: numberColor, fontSize: numberSize, lineHeight: numberSize }]}>
                 {formatSegment(timeLeft.hours)}
               </Text>
               {showLabels && <Text style={[styles.unitLabel, { color: labelColor, fontSize: labelSize }]}>HRS</Text>}
             </View>
-            <View style={[styles.sepWrap, { height: numberLineHeight }]}>
-              <Text style={[styles.sep, { color: numberColor, fontSize: numberSize }]}>:</Text>
+            <View style={styles.sepWrap}>
+              <Separator />
             </View>
           </>
         )}
         <View style={styles.unit}>
-          <Text style={[styles.number, { color: numberColor, fontSize: numberSize }]}>
+          <Text style={[styles.number, { color: numberColor, fontSize: numberSize, lineHeight: numberSize }]}>
             {formatSegment(timeLeft.minutes)}
           </Text>
           {showLabels && <Text style={[styles.unitLabel, { color: labelColor, fontSize: labelSize }]}>MINS</Text>}
         </View>
-        <View style={[styles.sepWrap, { height: numberLineHeight }]}>
-          <Text style={[styles.sep, { color: numberColor, fontSize: numberSize }]}>:</Text>
+        <View style={styles.sepWrap}>
+          <Separator />
         </View>
         <View style={styles.unit}>
-          <Text style={[styles.number, { color: numberColor, fontSize: numberSize }]}>
+          <Text style={[styles.number, { color: numberColor, fontSize: numberSize, lineHeight: numberSize }]}>
             {formatSegment(timeLeft.seconds)}
           </Text>
           {showLabels && <Text style={[styles.unitLabel, { color: labelColor, fontSize: labelSize }]}>SECS</Text>}
@@ -164,7 +168,7 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'center',
   },
   unit: {
@@ -180,7 +184,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   sepWrap: {
-    justifyContent: 'center',
     marginHorizontal: 2,
   },
   sep: {

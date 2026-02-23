@@ -12,14 +12,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { Theme } from '../../constants/theme';
 import { ChallengeService } from '../../services/challengeService';
 import { CheckInService } from '../../services/checkInService';
-import { AuthService } from '../../services/authService';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { Challenge, CheckIn, User } from '../../types';
 import { dateKeys } from '../../utils/dateKeys';
 import { useColorMode } from '../../theme/ColorModeContext';
-
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const DAY_NAMES = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+import { useCurrentUser } from '../../contexts/UserContext';
+import { MONTHS, DAY_NAMES } from '../../constants/calendar';
+import { generateMonthGrid, getColorForCount } from '../../utils/calendarGrid';
 
 interface ChallengeOption {
   id: string;
@@ -27,8 +26,9 @@ interface ChallengeOption {
 }
 
 export const CalendarScreen: React.FC = () => {
-  const { colors } = useColorMode();
-  const [user, setUser] = useState<User | null>(null);
+  const { mode, colors } = useColorMode();
+  const { user } = useCurrentUser();
+  const isDark = mode === 'dark';
   const [loading, setLoading] = useState(true);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [checkInsForMonth, setCheckInsForMonth] = useState<CheckIn[]>([]);
@@ -37,33 +37,21 @@ export const CalendarScreen: React.FC = () => {
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [showChallengeDropdown, setShowChallengeDropdown] = useState(false);
 
-  // Load user and challenges
+  // Load challenges once user is available
   useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const currentUser = await AuthService.getCurrentUser();
-      setUser(currentUser);
-
-      if (!currentUser?.id) {
-        console.log('⚠️ Calendar: Cannot load data - user or user.id is missing');
+    if (!user?.id) return;
+    (async () => {
+      try {
+        setLoading(true);
+        const userChallenges = await ChallengeService.getUserChallenges(user.id);
+        setChallenges(userChallenges);
+      } catch (error) {
+        if (__DEV__) console.error('Error loading calendar data:', error);
+      } finally {
         setLoading(false);
-        return;
       }
-
-      // Get all user challenges (for dropdown)
-      const userChallenges = await ChallengeService.getUserChallenges(currentUser.id);
-      setChallenges(userChallenges);
-
-      setLoading(false);
-    } catch (error) {
-      console.error('Error loading calendar data:', error);
-      setLoading(false);
-    }
-  };
+    })();
+  }, [user?.id]);
 
   const loadCheckInsForMonth = useCallback(async (month: Date) => {
     if (!user?.id) return;
@@ -94,11 +82,11 @@ export const CalendarScreen: React.FC = () => {
 
       setCheckInsForMonth(monthCheckIns);
     } catch (error) {
-      console.error('Error loading check-ins for month:', error);
+      if (__DEV__) console.error('Error loading check-ins for month:', error);
     }
   }, [user?.id, challenges]);
 
-  // Reload when screen comes into focus (fast refetch so new check-ins show immediately)
+  // Reload when screen comes into focus or month changes
   useFocusEffect(
     useCallback(() => {
       if (user) {
@@ -106,13 +94,6 @@ export const CalendarScreen: React.FC = () => {
       }
     }, [user, currentMonth, loadCheckInsForMonth])
   );
-
-  // Load check-ins when month or challenges change
-  useEffect(() => {
-    if (user) {
-      loadCheckInsForMonth(currentMonth);
-    }
-  }, [currentMonth, user, loadCheckInsForMonth]);
 
   const goToPreviousMonth = () => {
     setCurrentMonth(prev => {
@@ -143,47 +124,6 @@ export const CalendarScreen: React.FC = () => {
     setSelectedDate(today);
   };
 
-  // Generate calendar grid for the month
-  const generateMonthGrid = (): Date[][] => {
-    const year = currentMonth.getFullYear();
-    const month = currentMonth.getMonth();
-    
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    
-    const weeks: Date[][] = [];
-    let week: Date[] = [];
-    
-    // Fill in days from previous month
-    const startDay = firstDay.getDay();
-    for (let i = 0; i < startDay; i++) {
-      const prevDate = new Date(year, month, -startDay + i + 1);
-      week.push(prevDate);
-    }
-    
-    // Fill in days of current month
-    for (let day = 1; day <= lastDay.getDate(); day++) {
-      const date = new Date(year, month, day);
-      week.push(date);
-      
-      if (week.length === 7) {
-        weeks.push(week);
-        week = [];
-      }
-    }
-    
-    // Fill in days from next month
-    while (week.length > 0 && week.length < 7) {
-      const nextDate = new Date(year, month + 1, week.length - startDay + lastDay.getDate() + 1);
-      week.push(nextDate);
-    }
-    if (week.length > 0) {
-      weeks.push(week);
-    }
-    
-    return weeks;
-  };
-
   // Get completion count for a specific day
   const getCompletionCount = (date: Date): number => {
     const dayKey = dateKeys.getDayKey(date);
@@ -205,18 +145,11 @@ export const CalendarScreen: React.FC = () => {
     return relevantCheckIns.length;
   };
 
-  // Get color based on completion count (GitHub style)
-  const getColorForCount = (count: number): string => {
-    if (count === 0) return '#F0F0F0';
-    if (count === 1) return '#FFE5DC';
-    if (count === 2) return '#FFB088';
-    return '#FF6B35'; // 3+ completions
-  };
-
-  // Get challenges for selected date
+  // Get challenges for selected date. Check-ins are keyed by period.dayKey (challenge creator TZ).
+  // We match by calendar day (local); if creator TZ differs, a check-in may appear on adjacent day.
   const getChallengesForDate = (date: Date): Array<{ challenge: Challenge; checkIn: CheckIn }> => {
     const dayKey = dateKeys.getDayKey(date);
-    
+
     const relevantCheckIns = checkInsForMonth.filter(ci => {
       if (!ci.period?.dayKey) return false;
       if (ci.period.dayKey !== dayKey) return false;
@@ -266,7 +199,7 @@ export const CalendarScreen: React.FC = () => {
     });
   };
 
-  const monthGrid = generateMonthGrid();
+  const monthGrid = generateMonthGrid(currentMonth);
   const challengesForSelectedDate = getChallengesForDate(selectedDate);
   
   const challengeOptions: ChallengeOption[] = [
@@ -311,31 +244,33 @@ export const CalendarScreen: React.FC = () => {
           
           {showChallengeDropdown && (
             <View style={[styles.dropdownMenu, { backgroundColor: colors.surface, borderColor: colors.dividerLineTodo + '80' }]}>
-              {challengeOptions.map(option => (
-                <TouchableOpacity
-                  key={option.id}
-                  style={[
-                    styles.dropdownItem,
-                    { borderBottomColor: colors.dividerLineTodo + '40' },
-                    selectedChallenge === option.id && [styles.dropdownItemSelected, { backgroundColor: colors.card }]
-                  ]}
-                  onPress={() => {
-                    setSelectedChallenge(option.id);
-                    setShowChallengeDropdown(false);
-                  }}
-                >
-                  <Text style={[
-                    styles.dropdownItemText,
-                    { color: colors.text },
-                    selectedChallenge === option.id && [styles.dropdownItemTextSelected, { color: colors.accent }]
-                  ]}>
-                    {option.title}
-                  </Text>
-                  {selectedChallenge === option.id && (
-                    <Ionicons name="checkmark" size={20} color={colors.accent} />
-                  )}
-                </TouchableOpacity>
-              ))}
+              <ScrollView nestedScrollEnabled showsVerticalScrollIndicator>
+                {challengeOptions.map(option => (
+                  <TouchableOpacity
+                    key={option.id}
+                    style={[
+                      styles.dropdownItem,
+                      { borderBottomColor: colors.dividerLineTodo + '40' },
+                      selectedChallenge === option.id && [styles.dropdownItemSelected, { backgroundColor: colors.card }]
+                    ]}
+                    onPress={() => {
+                      setSelectedChallenge(option.id);
+                      setShowChallengeDropdown(false);
+                    }}
+                  >
+                    <Text style={[
+                      styles.dropdownItemText,
+                      { color: colors.text },
+                      selectedChallenge === option.id && [styles.dropdownItemTextSelected, { color: colors.accent }]
+                    ]}>
+                      {option.title}
+                    </Text>
+                    {selectedChallenge === option.id && (
+                      <Ionicons name="checkmark" size={20} color={colors.accent} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             </View>
           )}
         </View>
@@ -379,7 +314,7 @@ export const CalendarScreen: React.FC = () => {
             <View key={`week-${weekIndex}`} style={styles.weekRow}>
               {week.map((date, dayIndex) => {
                 const count = getCompletionCount(date);
-                const color = getColorForCount(count);
+                const color = getColorForCount(count, isDark);
                 const isTodayDate = isToday(date);
                 const isCurrentMonthDate = isCurrentMonth(date);
                 const isSelectedDate = isSelected(date);
@@ -397,9 +332,9 @@ export const CalendarScreen: React.FC = () => {
                   >
                     <Text style={[
                       styles.dayCellText,
-                      { color: colors.textSecondary },
-                      !isCurrentMonthDate && styles.dayCellTextOtherMonth,
-                      count > 0 && [styles.dayCellTextWithData, { color: colors.text }],
+                      { color: colors.text },
+                      !isCurrentMonthDate && { opacity: 0.4 },
+                      count > 0 && styles.dayCellTextWithData,
                     ]}>
                       {date.getDate()}
                     </Text>
@@ -413,10 +348,10 @@ export const CalendarScreen: React.FC = () => {
 
         <View style={styles.legend}>
           <Text style={[styles.legendText, { color: colors.textSecondary }]}>Less</Text>
-          <View style={[styles.legendBox, { backgroundColor: '#F0F0F0' }]} />
-          <View style={[styles.legendBox, { backgroundColor: '#FFE5DC' }]} />
-          <View style={[styles.legendBox, { backgroundColor: '#FFB088' }]} />
-          <View style={[styles.legendBox, { backgroundColor: '#FF6B35' }]} />
+          <View style={[styles.legendBox, { backgroundColor: getColorForCount(0, isDark) }]} />
+          <View style={[styles.legendBox, { backgroundColor: getColorForCount(1, isDark) }]} />
+          <View style={[styles.legendBox, { backgroundColor: getColorForCount(2, isDark) }]} />
+          <View style={[styles.legendBox, { backgroundColor: getColorForCount(3, isDark) }]} />
           <Text style={[styles.legendText, { color: colors.textSecondary }]}>More</Text>
         </View>
 
@@ -528,6 +463,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
     maxHeight: 300,
+    overflow: 'hidden',
   },
   dropdownItem: {
     flexDirection: 'row',

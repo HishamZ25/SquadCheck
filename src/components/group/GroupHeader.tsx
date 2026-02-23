@@ -44,7 +44,7 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
             onPress={() => onTabChange('leaderboard')}
             activeOpacity={0.7}
           >
-            <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'leaderboard' && { color: '#FFF' }]}>
+            <Text style={[styles.tabText, { color: colors.text }, activeTab === 'leaderboard' && { color: '#FFF' }]}>
               Leaderboard
             </Text>
           </TouchableOpacity>
@@ -53,7 +53,7 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
             onPress={() => onTabChange('chat')}
             activeOpacity={0.7}
           >
-            <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'chat' && { color: '#FFF' }]}>
+            <Text style={[styles.tabText, { color: colors.text }, activeTab === 'chat' && { color: '#FFF' }]}>
               Chat
             </Text>
           </TouchableOpacity>
@@ -62,7 +62,7 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
             onPress={() => onTabChange('settings')}
             activeOpacity={0.7}
           >
-            <Text style={[styles.tabText, { color: colors.textSecondary }, activeTab === 'settings' && { color: '#FFF' }]}>
+            <Text style={[styles.tabText, { color: colors.text }, activeTab === 'settings' && { color: '#FFF' }]}>
               Settings
             </Text>
           </TouchableOpacity>

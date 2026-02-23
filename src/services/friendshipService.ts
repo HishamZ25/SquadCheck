@@ -15,28 +15,34 @@ import { Friendship, User } from '../types';
 import { AuthService } from './authService';
 
 export class FriendshipService {
-  // Get all friends for a user (fetches friend user docs in parallel)
+  // Get all friends for a user (two targeted queries instead of full-collection scan)
   static async getUserFriends(userId: string): Promise<User[]> {
     try {
-      const friendshipsQuery = query(
-        collection(db, 'friendships'),
-        where('status', '==', 'accepted')
-      );
+      const [snap1, snap2] = await Promise.all([
+        getDocs(query(
+          collection(db, 'friendships'),
+          where('userId1', '==', userId),
+          where('status', '==', 'accepted')
+        )),
+        getDocs(query(
+          collection(db, 'friendships'),
+          where('userId2', '==', userId),
+          where('status', '==', 'accepted')
+        )),
+      ]);
 
-      const querySnapshot = await getDocs(friendshipsQuery);
       const friendIds: string[] = [];
-
-      querySnapshot.docs.forEach((d) => {
-        const friendship = d.data() as Friendship;
-        const trimmedUserId1 = friendship.userId1?.trim();
-        const trimmedUserId2 = friendship.userId2?.trim();
-        if (trimmedUserId1 === userId && trimmedUserId2) friendIds.push(trimmedUserId2);
-        else if (trimmedUserId2 === userId && trimmedUserId1) friendIds.push(trimmedUserId1);
+      snap1.docs.forEach((d) => {
+        const f = d.data() as Friendship;
+        if (f.userId2?.trim()) friendIds.push(f.userId2.trim());
+      });
+      snap2.docs.forEach((d) => {
+        const f = d.data() as Friendship;
+        if (f.userId1?.trim()) friendIds.push(f.userId1.trim());
       });
 
       if (friendIds.length === 0) return [];
 
-      // Fetch all friend user documents in parallel (one failure doesn't break the rest)
       const userPromises = friendIds.map((friendId) =>
         getDoc(doc(db, 'users', friendId))
           .then((userDoc) => {
@@ -50,7 +56,7 @@ export class FriendshipService {
       const results = await Promise.all(userPromises);
       return results.filter((u): u is User => u != null);
     } catch (error) {
-      console.error('Error getting user friends:', error);
+      if (__DEV__) console.error('Error getting user friends:', error);
       return [];
     }
   }
@@ -75,7 +81,7 @@ export class FriendshipService {
       
       return false;
     } catch (error) {
-      console.error('Error checking friendship status:', error);
+      if (__DEV__) console.error('Error checking friendship status:', error);
       return false;
     }
   }
@@ -95,7 +101,7 @@ export class FriendshipService {
         ...doc.data()
       })) as Friendship[];
     } catch (error) {
-      console.error('Error getting pending friend requests:', error);
+      if (__DEV__) console.error('Error getting pending friend requests:', error);
       return [];
     }
   }
@@ -106,7 +112,7 @@ export class FriendshipService {
       const friends = await this.getUserFriends(userId);
       return friends.length;
     } catch (error) {
-      console.error('Error getting friend count:', error);
+      if (__DEV__) console.error('Error getting friend count:', error);
       return 0;
     }
   }
@@ -135,7 +141,7 @@ export class FriendshipService {
 
       return null;
     } catch (error) {
-      console.error('Error searching for user:', error);
+      if (__DEV__) console.error('Error searching for user:', error);
       throw new Error('Failed to search for user');
     }
   }
@@ -190,7 +196,7 @@ export class FriendshipService {
         createdAt: serverTimestamp(),
       });
     } catch (error: any) {
-      console.error('Error sending friend request:', error);
+      if (__DEV__) console.error('Error sending friend request:', error);
       throw error;
     }
   }
@@ -210,7 +216,7 @@ export class FriendshipService {
         ...doc.data()
       }));
     } catch (error) {
-      console.error('Error getting pending requests:', error);
+      if (__DEV__) console.error('Error getting pending requests:', error);
       return [];
     }
   }
@@ -235,7 +241,7 @@ export class FriendshipService {
       // Delete the request (clean up)
       await deleteDoc(doc(db, 'friendRequests', requestId));
     } catch (error) {
-      console.error('Error accepting friend request:', error);
+      if (__DEV__) console.error('Error accepting friend request:', error);
       throw new Error('Failed to accept friend request');
     }
   }
@@ -246,7 +252,7 @@ export class FriendshipService {
       // Just delete the request
       await deleteDoc(doc(db, 'friendRequests', requestId));
     } catch (error) {
-      console.error('Error declining friend request:', error);
+      if (__DEV__) console.error('Error declining friend request:', error);
       throw new Error('Failed to decline friend request');
     }
   }

@@ -18,12 +18,14 @@ import { Avatar } from '../../components/common/Avatar';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { AddFriendModal } from '../../components/common/AddFriendModal';
 import { User } from '../../types';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 interface FriendsScreenProps {
   navigation: any;
 }
 
 export const FriendsScreen: React.FC<FriendsScreenProps> = ({ navigation }) => {
+  const { colors } = useColorMode();
   const [friends, setFriends] = useState<User[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,7 +55,7 @@ export const FriendsScreen: React.FC<FriendsScreenProps> = ({ navigation }) => {
         setLoading(false);
       }
     } catch (error) {
-      console.error('Error loading user:', error);
+      if (__DEV__) console.error('Error loading user:', error);
       setLoading(false);
     }
   };
@@ -70,7 +72,7 @@ export const FriendsScreen: React.FC<FriendsScreenProps> = ({ navigation }) => {
       const validFriends = (userFriends || []).filter((f) => f && f.id);
       setFriends(validFriends);
     } catch (error) {
-      console.error('Error loading friends:', error);
+      if (__DEV__) console.error('Error loading friends:', error);
       setFriends([]);
     } finally {
       setLoading(false);
@@ -100,7 +102,7 @@ export const FriendsScreen: React.FC<FriendsScreenProps> = ({ navigation }) => {
 
     return (
       <TouchableOpacity
-        style={styles.friendCard}
+        style={[styles.friendCard, { backgroundColor: colors.surface, borderColor: colors.dividerLineTodo + '60' }]}
         onPress={() => handleFriendPress(item)}
         activeOpacity={0.7}
       >
@@ -110,14 +112,14 @@ export const FriendsScreen: React.FC<FriendsScreenProps> = ({ navigation }) => {
           size="md"
         />
         <View style={styles.friendInfo}>
-          <Text style={styles.friendName} numberOfLines={1}>
+          <Text style={[styles.friendName, { color: colors.text }]} numberOfLines={1}>
             {displayName}
           </Text>
-          <Text style={styles.friendSubtitle} numberOfLines={1}>
+          <Text style={[styles.friendSubtitle, { color: colors.textSecondary }]} numberOfLines={1}>
             {subtitle}
           </Text>
         </View>
-        <Ionicons name="chevron-forward" size={20} color="#FF6B35" />
+        <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
       </TouchableOpacity>
     );
   }, [handleFriendPress]);
@@ -133,7 +135,7 @@ export const FriendsScreen: React.FC<FriendsScreenProps> = ({ navigation }) => {
         title: 'Join SquadCheck',
       });
     } catch (error) {
-      console.error('Error sharing invite:', error);
+      if (__DEV__) console.error('Error sharing invite:', error);
     }
   };
 
@@ -149,9 +151,9 @@ export const FriendsScreen: React.FC<FriendsScreenProps> = ({ navigation }) => {
 
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
-      <Ionicons name="people-outline" size={64} color={Theme.colors.textSecondary} />
-      <Text style={styles.emptyTitle}>No Friends Yet</Text>
-      <Text style={styles.emptySubtitle}>
+      <Ionicons name="people-outline" size={64} color={colors.textSecondary} />
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>No Friends Yet</Text>
+      <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
         Add friends to see their progress and stay motivated together!
       </Text>
     </View>
@@ -159,7 +161,7 @@ export const FriendsScreen: React.FC<FriendsScreenProps> = ({ navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <LoadingSpinner />
       </SafeAreaView>
     );
@@ -169,7 +171,7 @@ export const FriendsScreen: React.FC<FriendsScreenProps> = ({ navigation }) => {
   const validFriends = friends.filter(f => f && f.id);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.content}>
         <FlatList
           data={validFriends}
@@ -199,34 +201,34 @@ export const FriendsScreen: React.FC<FriendsScreenProps> = ({ navigation }) => {
           <>
             {/* Add Friend Button - Top Right */}
             <TouchableOpacity
-              style={[styles.actionButton, styles.actionButtonTop]}
+              style={[styles.actionButton, styles.actionButtonTop, { backgroundColor: colors.surface, borderColor: colors.accent }]}
               onPress={handleAddFriend}
               activeOpacity={0.8}
             >
-              <Ionicons name="person-add-outline" size={24} color="#FF6B35" />
+              <Ionicons name="person-add-outline" size={24} color={colors.accent} />
             </TouchableOpacity>
 
             {/* Invite Friends Button - Bottom Left */}
             <TouchableOpacity
-              style={[styles.actionButton, styles.actionButtonBottom]}
+              style={[styles.actionButton, styles.actionButtonBottom, { backgroundColor: colors.surface, borderColor: colors.accent }]}
               onPress={handleInviteFriendsFromMenu}
               activeOpacity={0.8}
             >
-              <Ionicons name="share-outline" size={24} color="#FF6B35" />
+              <Ionicons name="share-outline" size={24} color={colors.accent} />
             </TouchableOpacity>
           </>
         )}
 
         {/* Main FAB */}
         <TouchableOpacity
-          style={[styles.fab, showActionMenu && styles.fabActive]}
+          style={[styles.fab, showActionMenu && styles.fabActive, { backgroundColor: colors.surface, borderColor: colors.accent }]}
           onPress={() => setShowActionMenu(!showActionMenu)}
           activeOpacity={0.8}
         >
-          <Ionicons 
-            name={showActionMenu ? "close" : "add"} 
-            size={24} 
-            color="#FF6B35" 
+          <Ionicons
+            name={showActionMenu ? "close" : "add"}
+            size={24}
+            color={colors.accent}
           />
         </TouchableOpacity>
       </View>
@@ -261,17 +263,15 @@ const styles = StyleSheet.create({
   friendCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF5F0',
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 2,
-    borderColor: '#FF6B35',
-    shadowColor: '#FF6B35',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 2,
   },
   friendInfo: {
     flex: 1,

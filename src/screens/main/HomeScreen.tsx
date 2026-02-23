@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,13 +7,13 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Modal,
   Animated,
   Dimensions,
   Alert,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../components/common/Button';
 import { Avatar } from '../../components/common/Avatar';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
@@ -24,26 +24,43 @@ import { FriendshipService } from '../../services/friendshipService';
 import { Theme } from '../../constants/theme';
 import { GroupService } from '../../services/groupService';
 import { ChallengeService } from '../../services/challengeService';
-import { AuthService } from '../../services/authService';
-import { Group, User, Challenge } from '../../types';
+import { Group, User, Challenge, Reminder } from '../../types';
 import { useFocusEffect } from '@react-navigation/native';
-import { AlertCircle, Bell, Moon, Plus, Sun, Trophy, User as UserIcon, Users, X } from 'lucide-react-native';
-import { DicebearService } from '../../services/dicebearService';
-import * as ImagePicker from 'expo-image-picker';
-import { doc, getDoc } from 'firebase/firestore';
-import { db, auth } from '../../services/firebase';
+import { AlertCircle, Bell as BellIcon, Check, Clock, Moon, Plus, Sparkles, Sun, Trophy, User as UserIcon, X } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  generateCustomAvatarUrl,
+  DICEBEAR_STYLES,
+  DICEBEAR_BACKGROUNDS,
+  type DicebearStyle,
+} from '../../services/dicebearService';
+import { CenteredModal } from '../../components/common/CenteredModal';
+import * as Haptics from 'expo-haptics';
+import { auth } from '../../services/firebase';
+import { useCurrentUser } from '../../contexts/UserContext';
+import { AuthService } from '../../services/authService';
+import { userCache } from '../../services/userCache';
 import { dateKeys } from '../../utils/dateKeys';
 import { challengeEval } from '../../utils/challengeEval';
+import {
+  resolveAdminTimeZone,
+  getAdminZoneDayKey,
+  getCurrentPeriodDayKey,
+  getCurrentPeriodWeekKey,
+  computeDueMomentUtcForDay,
+  computeDeadlineMomentUtc,
+} from '../../utils/dueTime';
 import Svg, { Path } from 'react-native-svg';
+import { ReminderService } from '../../services/reminderService';
+import { GamificationService } from '../../services/gamificationService';
 import { useColorMode } from '../../theme/ColorModeContext';
-
 
 interface HomeScreenProps {
   navigation: any;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const { user, refreshUser } = useCurrentUser();
   const [groups, setGroups] = useState<Group[]>([]);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [challengeDetailsCache, setChallengeDetailsCache] = useState<Record<string, any>>({});
@@ -54,19 +71,37 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   const [groupMembers, setGroupMembers] = useState<Record<string, User[]>>({});
   const [showNotifications, setShowNotifications] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
-  
-  
+  const [todayReminders, setTodayReminders] = useState<Reminder[]>([]);
+  const [dismissedReminderIds, setDismissedReminderIds] = useState<Set<string>>(new Set());
+  const dismissedStorageKey = `dismissed_reminders_${new Date().toISOString().slice(0, 10)}`;
+  const [showCongratsModal, setShowCongratsModal] = useState(false);
+  const congratsScale = useRef(new Animated.Value(0)).current;
+  const congratsOpacity = useRef(new Animated.Value(0)).current;
+  const sparkleRotation = useRef(new Animated.Value(0)).current;
+
+  // Avatar customization modal state
+  const [avatarModalVisible, setAvatarModalVisible] = useState(false);
+  const [avatarStyle, setAvatarStyle] = useState<DicebearStyle>('avataaars');
+  const [avatarBgIndex, setAvatarBgIndex] = useState(0);
+  const [seedOverride, setSeedOverride] = useState<string | null>(null);
+  const [useSavedAsPreview, setUseSavedAsPreview] = useState(true);
+  const [savingAvatar, setSavingAvatar] = useState(false);
+
+  // Alert modal state for eliminated / deadline-ended challenges
+  const [alertChallenge, setAlertChallenge] = useState<{ challenge: Challenge; type: 'eliminated' | 'deadline_ended' } | null>(null);
+
   const hasLoadedOnce = useRef(false);
+  const lastLoadedAt = useRef(0);
   const scrollRef = useRef<any>(null);
   const { mode, colors, toggleMode } = useColorMode();
 
+  // Load persisted dismissed reminder IDs on mount
   useEffect(() => {
-    loadUserData();
-    
-    // Test Dicebear service
-    console.log('Testing Dicebear service...');
-    const testAvatar = DicebearService.testDicebear();
-    console.log('Test avatar result:', testAvatar ? 'Success' : 'Failed');
+    AsyncStorage.getItem(dismissedStorageKey).then(json => {
+      if (json) {
+        try { setDismissedReminderIds(new Set(JSON.parse(json))); } catch {}
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -79,8 +114,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
   useFocusEffect(
     useCallback(() => {
       if (user) {
+        // Staleness guard: skip refetch if loaded less than 2s ago
+        if (Date.now() - lastLoadedAt.current < 2000) return;
         loadGroups({ showLoading: false });
         loadNotificationCount();
+        // Refresh user doc so XP/level updates are reflected immediately
+        refreshUser();
       }
     }, [user])
   );
@@ -91,26 +130,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       const requests = await FriendshipService.getPendingRequests(user.id);
       setNotificationCount(requests.length);
     } catch (error) {
-      console.error('Error loading notification count:', error);
+      if (__DEV__) console.error('Error loading notification count:', error);
     }
   };
 
-  const loadUserData = async () => {
-    try {
-      console.log('Loading user data...');
-      const currentUser = await AuthService.getCurrentUser();
-      console.log('Loaded user data:', currentUser);
-      setUser(currentUser);
-    } catch (error) {
-      console.error('Error loading user data:', error);
-      setError('Failed to load user data');
-      setLoading(false);
-    }
+  // getUserChallenges already returns all challenges via challengeMembers — no extra group fetch needed
+  const deduplicateChallenges = (userChallenges: Challenge[]): Challenge[] => {
+    const byId = new Map<string, Challenge>();
+    for (const c of userChallenges) byId.set(c.id, c);
+    return Array.from(byId.values()).sort(
+      (a, b) => (b.createdAt?.getTime?.() ?? 0) - (a.createdAt?.getTime?.() ?? 0)
+    );
   };
 
   const loadGroups = async (options?: { showLoading?: boolean }) => {
     if (!user || !user.id) {
-      console.log('⚠️ Cannot load groups - user or user.id is missing:', user);
       return;
     }
     const isFirstLoad = !hasLoadedOnce.current;
@@ -123,36 +157,46 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       }
       setError(null);
 
-      // Load groups and user-scoped challenges in parallel (minimal fetch to show list fast)
-      const [userGroups, userChallenges] = await Promise.all([
+      // Load groups, challenges, and reminders in parallel
+      const [userGroups, userChallenges, userReminders] = await Promise.all([
         GroupService.getUserGroups(user.id),
-        ChallengeService.getUserChallenges(user.id)
+        ChallengeService.getUserChallenges(user.id),
+        ReminderService.getUserReminders(user.id),
       ]);
+
+      // Filter reminders relevant to today
+      const today = new Date();
+      const todayDayOfWeek = today.getDay(); // 0=Sun
+      const todayDateOfMonth = today.getDate(); // 1-31
+      const filtered = userReminders.filter(r => {
+        if (!r.isActive) return false;
+        if (r.frequency === 'daily') return true;
+        if (r.frequency === 'weekly') {
+          const entries = r.schedule as { day: number; hour: number }[];
+          return entries.some(e => e.day === todayDayOfWeek);
+        }
+        if (r.frequency === 'monthly') {
+          const entries = r.schedule as { day: number; hour: number }[];
+          return entries.some(e => e.day === todayDateOfMonth);
+        }
+        return false;
+      });
+      setTodayReminders(filtered);
 
       setGroups(userGroups);
 
-      // Merge with challenges from every group (same source as Group screen)
-      const groupChallengesArrays = await Promise.all(
-        userGroups.map((g) => ChallengeService.getGroupChallenges(g.id))
-      );
-      const byId = new Map<string, Challenge>();
-      for (const c of userChallenges) byId.set(c.id, c);
-      for (const list of groupChallengesArrays) {
-        for (const c of list) if (!byId.has(c.id)) byId.set(c.id, c);
-      }
-      const mergedChallenges = Array.from(byId.values()).sort(
-        (a, b) => (b.createdAt?.getTime?.() ?? 0) - (a.createdAt?.getTime?.() ?? 0)
-      );
+      const mergedChallenges = deduplicateChallenges(userChallenges);
       setChallenges(mergedChallenges);
       if (showLoading) setLoading(false);
+      lastLoadedAt.current = Date.now();
 
       // Prefetch details and members in background so list appears immediately
       Promise.all([
         loadGroupMembers(userGroups),
         prefetchChallengeDetails(mergedChallenges, user.id)
-      ]).catch((err) => console.error('Background prefetch error:', err));
+      ]).catch((err) => { if (__DEV__) console.error('Background prefetch error:', err); });
     } catch (error) {
-      console.error('Error loading data:', error);
+      if (__DEV__) console.error('Error loading data:', error);
       setError('Failed to load data');
       setLoading(false);
     }
@@ -181,95 +225,121 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       });
       
       setChallengeDetailsCache(cache);
+
+      // Check for eliminated or deadline-ended challenges to show alert
+      checkForAlerts(challenges, cache, userId);
     } catch (error) {
-      console.error('Error prefetching challenge details:', error);
+      if (__DEV__) console.error('Error prefetching challenge details:', error);
       // Don't throw - prefetch is an optimization, not critical
+    }
+  };
+
+  const checkForAlerts = async (challengeList: Challenge[], cache: Record<string, any>, userId: string) => {
+    for (const challenge of challengeList) {
+      const details = cache[challenge.id];
+      if (!details) continue;
+
+      // Skip ended challenges (already handled)
+      if ((challenge as any).state === 'ended') continue;
+
+      // Check eliminated
+      if ((challenge as any).type === 'elimination') {
+        const me = details.challengeMembers?.find((m: any) => m.userId === userId);
+        if (me?.state === 'eliminated') {
+          const storageKey = `alert_shown_${challenge.id}_eliminated`;
+          const shown = await AsyncStorage.getItem(storageKey);
+          if (!shown) {
+            await AsyncStorage.setItem(storageKey, '1');
+            setAlertChallenge({ challenge, type: 'eliminated' });
+            return; // Show one alert at a time
+          }
+        }
+      }
+
+      // Check deadline ended
+      if ((challenge as any).type === 'deadline' && challenge.due?.deadlineDate) {
+        const adminTz = resolveAdminTimeZone(challenge);
+        const dueTimeLocal = challenge.due?.dueTimeLocal || '23:59';
+        const deadlineMoment = computeDeadlineMomentUtc(adminTz, challenge.due.deadlineDate, dueTimeLocal);
+        if (Date.now() >= deadlineMoment.getTime()) {
+          const storageKey = `alert_shown_${challenge.id}_deadline_ended`;
+          const shown = await AsyncStorage.getItem(storageKey);
+          if (!shown) {
+            await AsyncStorage.setItem(storageKey, '1');
+            setAlertChallenge({ challenge, type: 'deadline_ended' });
+            return;
+          }
+        }
+      }
     }
   };
 
   const loadGroupMembers = async (groups: Group[]) => {
     try {
-      // Collect all unique member IDs across all groups
       const allMemberIds = new Set<string>();
       groups.forEach(group => {
         group.memberIds.forEach(id => allMemberIds.add(id));
       });
-      
-      // Fetch all members in parallel
-      const memberPromises = Array.from(allMemberIds).map(async (memberId) => {
-        try {
-          const userDoc = await getDoc(doc(db, 'users', memberId));
-          if (userDoc.exists()) {
-            return { id: memberId, data: userDoc.data() as User };
-          }
-        } catch (error) {
-          console.error('Error loading member:', memberId, error);
-        }
-        return null;
-      });
-      
-      const memberResults = await Promise.all(memberPromises);
-      
-      // Build a member lookup map
-      const memberLookup: Record<string, User> = {};
-      memberResults.forEach(result => {
-        if (result) {
-          memberLookup[result.id] = result.data;
-        }
-      });
-      
-      // Build the members map for each group
+
+      const memberLookup = await userCache.getUsers(Array.from(allMemberIds));
+
       const membersMap: Record<string, User[]> = {};
       groups.forEach(group => {
         membersMap[group.id] = group.memberIds
-          .map(id => memberLookup[id])
+          .map(id => memberLookup.get(id)!)
           .filter(Boolean);
       });
-      
+
       setGroupMembers(membersMap);
     } catch (error) {
-      console.error('Error loading group members:', error);
+      if (__DEV__) console.error('Error loading group members:', error);
     }
   };
 
-  const handleAvatarPress = async () => {
+  // Avatar customization helpers
+  const customAvatarUrl = useMemo(() => {
+    const seed = seedOverride ?? user?.displayName ?? user?.email ?? 'user';
+    const bg = DICEBEAR_BACKGROUNDS[avatarBgIndex];
+    return generateCustomAvatarUrl(seed, 400, avatarStyle, bg);
+  }, [seedOverride, user?.displayName, user?.email, avatarStyle, avatarBgIndex]);
+
+  const displayPreviewUrl = (useSavedAsPreview && user?.photoURL) ? user.photoURL : customAvatarUrl;
+
+  const handleAvatarPress = () => {
+    setAvatarModalVisible(true);
+  };
+
+  const handleCloseAvatarModal = () => {
+    setSeedOverride(null);
+    setUseSavedAsPreview(true);
+    setAvatarModalVisible(false);
+  };
+
+  const handleRandomizeAvatar = () => {
+    setUseSavedAsPreview(false);
+    setSeedOverride('r-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10));
+  };
+
+  const handleUseMyName = () => {
+    setSeedOverride(null);
+    setUseSavedAsPreview(false);
+  };
+
+  const handleSaveCustomAvatar = async () => {
+    if (!user?.id) return;
+    if (useSavedAsPreview && user?.photoURL) {
+      handleCloseAvatarModal();
+      return;
+    }
+    setSavingAvatar(true);
     try {
-      // Request permissions
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
-      if (status !== 'granted') {
-        Alert.alert(
-          'Permission Required',
-          'Please allow access to your photo library to change your profile picture.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-
-      // Launch image picker
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-        allowsMultipleSelection: false,
-      });
-
-      if (!result.canceled && result.assets && result.assets[0]) {
-        const selectedImage = result.assets[0];
-        console.log('Selected image:', selectedImage.uri);
-        
-        // TODO: Upload image to Firebase Storage and update user profile
-        // For now, just show a success message
-        Alert.alert(
-          'Image Selected',
-          'Profile picture updated successfully! (Upload to Firebase coming soon)',
-          [{ text: 'OK' }]
-        );
-      }
-    } catch (error) {
-      console.error('Error selecting image:', error);
-      Alert.alert('Error', 'Failed to select image. Please try again.');
+      await AuthService.updateProfile({ photoURL: customAvatarUrl });
+      await refreshUser();
+      handleCloseAvatarModal();
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to update avatar');
+    } finally {
+      setSavingAvatar(false);
     }
   };
 
@@ -277,57 +347,112 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     if (!user) return;
     setRefreshing(true);
     try {
-      const [userGroups, userChallenges] = await Promise.all([
+      const [userGroups, userChallenges, userReminders] = await Promise.all([
         GroupService.getUserGroups(user.id),
-        ChallengeService.getUserChallenges(user.id)
+        ChallengeService.getUserChallenges(user.id),
+        ReminderService.getUserReminders(user.id),
       ]);
       setGroups(userGroups);
-      // Merge in challenges from every group (same as loadGroups)
-      const groupChallengesArrays = await Promise.all(
-        userGroups.map((g) => ChallengeService.getGroupChallenges(g.id))
-      );
-      const byId = new Map<string, Challenge>();
-      for (const c of userChallenges) byId.set(c.id, c);
-      for (const list of groupChallengesArrays) {
-        for (const c of list) if (!byId.has(c.id)) byId.set(c.id, c);
-      }
-      const mergedChallenges = Array.from(byId.values()).sort(
-        (a, b) => (b.createdAt?.getTime?.() ?? 0) - (a.createdAt?.getTime?.() ?? 0)
-      );
+      const mergedChallenges = deduplicateChallenges(userChallenges);
       setChallenges(mergedChallenges);
+
+      // Filter reminders for today
+      const today = new Date();
+      const todayDayOfWeek = today.getDay();
+      const todayDateOfMonth = today.getDate();
+      const filtered = userReminders.filter(r => {
+        if (!r.isActive) return false;
+        if (r.frequency === 'daily') return true;
+        if (r.frequency === 'weekly') {
+          const entries = r.schedule as { day: number; hour: number }[];
+          return entries.some(e => e.day === todayDayOfWeek);
+        }
+        if (r.frequency === 'monthly') {
+          const entries = r.schedule as { day: number; hour: number }[];
+          return entries.some(e => e.day === todayDateOfMonth);
+        }
+        return false;
+      });
+      setTodayReminders(filtered);
+
       await Promise.all([
         loadGroupMembers(userGroups),
         prefetchChallengeDetails(mergedChallenges, user.id)
       ]);
     } catch (error) {
-      console.error('Error refreshing data:', error);
+      if (__DEV__) console.error('Error refreshing data:', error);
     } finally {
       setRefreshing(false);
     }
   };
 
   const handleNewChallenge = () => {
-    console.log('New Challenge pressed');
     setShowActionMenu(false);
     navigation.navigate('SelectGroup');
   };
 
   const handleNewSoloChallenge = () => {
-    console.log('New Solo Challenge pressed');
     setShowActionMenu(false);
     navigation.navigate('GroupType', { isSolo: true });
   };
 
   const handleNewReminder = () => {
-    console.log('New Reminder pressed');
     setShowActionMenu(false);
     navigation.navigate('CreateReminder');
   };
 
+  const CONGRATS_MESSAGES = [
+    "Congratulations! You've completed all challenges for the day! Keep it up!",
+    "Well done! You've submitted for all the challenges for the day! Keep up the good work!",
+    "Good work! You've done everything assigned for the day! Stay Locked in!",
+  ];
+
+  const handleDismissReminder = (reminderId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setDismissedReminderIds(prev => {
+      const next = new Set(prev);
+      next.add(reminderId);
+      // Persist to AsyncStorage so it survives app restarts
+      AsyncStorage.setItem(dismissedStorageKey, JSON.stringify([...next])).catch(() => {});
+      return next;
+    });
+  };
+
+  const showCongratsAnimation = () => {
+    setShowCongratsModal(true);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    congratsScale.setValue(0);
+    congratsOpacity.setValue(0);
+    sparkleRotation.setValue(0);
+    Animated.parallel([
+      Animated.spring(congratsScale, {
+        toValue: 1,
+        friction: 4,
+        tension: 60,
+        useNativeDriver: true,
+      }),
+      Animated.timing(congratsOpacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.loop(
+        Animated.timing(sparkleRotation, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+      ),
+    ]).start();
+  };
+
+  // Track previous to-do count to detect transition to 0
+  const prevToDoCountRef = useRef<number | null>(null);
+
   const SEPARATOR_WIDTH = Dimensions.get('window').width - (Theme.layout.screenPadding || 24) * 2;
-  const DIP_DEPTH = 12;
-  const CURVE_INSET = 32;
-  const STROKE = 2.5;
+  const DIP_DEPTH = 10;
+  const CURVE_INSET = 30;
+  const STROKE = 2;
   const SVG_HEIGHT = DIP_DEPTH + STROKE * 2;
 
   const renderSectionBlock = (title: string, count: number, variant: 'todo' | 'finished') => {
@@ -362,70 +487,32 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     );
   };
 
-  const renderGroupItem = (item: Group) => {
-    const maxAvatars = 5;
-    const members = groupMembers[item.id] || [];
-    const displayMembers = members.slice(0, maxAvatars);
-    const extraCount = Math.max(0, item.memberIds.length - maxAvatars);
+  const isChallengeEnded = (challenge: Challenge): boolean => {
+    return (challenge as any).state === 'ended';
+  };
 
-    return (
-      <TouchableOpacity
-        style={styles.groupCard}
-        onPress={() => navigation.navigate('GroupChat', { groupId: item.id })}
-      >
-        {/* Top Row: Overlapping Avatars on Left, Challenge Badge on Right */}
-        <View style={styles.topRow}>
-          <View style={styles.overlappingAvatars}>
-            {displayMembers.map((member, index) => (
-              <View 
-                key={member.id} 
-                style={[
-                  styles.avatarCircle,
-                  { 
-                    zIndex: maxAvatars - index,
-                    marginLeft: index > 0 ? -10 : 0 
-                  }
-                ]}
-              >
-                <Avatar
-                  source={member.photoURL}
-                  initials={member.displayName?.charAt(0)?.toUpperCase() || '?'}
-                  size="sm"
-                />
-              </View>
-            ))}
-            {extraCount > 0 && (
-              <View 
-                style={[
-                  styles.avatarCircle,
-                  styles.extraAvatarBadge,
-                  { marginLeft: -10 }
-                ]}
-              >
-                <Text style={styles.extraAvatarText}>+{extraCount}</Text>
-              </View>
-            )}
-          </View>
-          
-          {/* Challenge count */}
-          <View style={styles.challengeBadge}>
-            <Text style={styles.challengeCount}>0</Text>
-          </View>
-        </View>
-
-        {/* Middle: Group Info */}
-        <View style={styles.groupContent}>
-          <Text style={styles.groupName}>{item.name}</Text>
-        </View>
-      </TouchableOpacity>
-    );
+  const isDeadlinePassed = (challenge: Challenge): boolean => {
+    if ((challenge as any).type !== 'deadline' || !challenge.due?.deadlineDate) return false;
+    const adminTz = resolveAdminTimeZone(challenge);
+    const dueTimeLocal = challenge.due?.dueTimeLocal || '23:59';
+    const deadlineMoment = computeDeadlineMomentUtc(adminTz, challenge.due.deadlineDate, dueTimeLocal);
+    return Date.now() >= deadlineMoment.getTime();
   };
 
   const isChallengeCompleted = (challenge: Challenge): boolean => {
     // Check if challenge is completed today/this week
     if (!challengeDetailsCache[challenge.id]) return false;
     const details = challengeDetailsCache[challenge.id];
-    return details.checkInsForCurrentPeriod?.some((ci: any) => ci.userId === user?.id && ci.status === 'completed') || false;
+    const myCompletedCount = details.checkInsForCurrentPeriod?.filter(
+      (ci: any) => ci.userId === user?.id && ci.status === 'completed'
+    ).length || 0;
+    if (myCompletedCount === 0) return false;
+    // Weekly challenges require requiredCount check-ins to be "done"
+    if (challenge.cadence?.unit === 'weekly') {
+      const required = challenge.cadence.requiredCount || 1;
+      return myCompletedCount >= required;
+    }
+    return true; // daily: 1 completed = done
   };
 
   const isUserEliminated = (challenge: Challenge): boolean => {
@@ -435,33 +522,56 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     const me = members.find((m: any) => m.userId === user.id);
     return me?.state === 'eliminated';
   };
+
+  const getUserStreak = (challenge: Challenge): number => {
+    if (!user?.id) return 0;
+    const details = challengeDetailsCache[challenge.id];
+    const members: any[] = details?.challengeMembers ?? [];
+    const me = members.find((m: any) => m.userId === user.id);
+    return me?.currentStreak || 0;
+  };
   
   const handleCheckInPress = async (challenge: Challenge, e: any) => {
     e.stopPropagation(); // Prevent card navigation
-    
+
+    if (isChallengeEnded(challenge)) {
+      Alert.alert('Challenge Ended', 'This challenge has ended. Check-ins are no longer accepted.');
+      return;
+    }
+
+    if (isDeadlinePassed(challenge)) {
+      Alert.alert('Deadline Passed', 'The deadline for this challenge has passed. Check-ins are no longer accepted.');
+      return;
+    }
+
     // Load challenge details if not cached
     if (!challengeDetailsCache[challenge.id]) {
       try {
         const details = await ChallengeService.getChallengeDetails(challenge.id, auth.currentUser?.uid || '');
         setChallengeDetailsCache(prev => ({ ...prev, [challenge.id]: details }));
       } catch (error) {
-        console.error('Error loading challenge:', error);
+        if (__DEV__) console.error('Error loading challenge:', error);
         Alert.alert('Error', 'Failed to load challenge details');
         return;
       }
     }
     
-    // Check if already submitted for the period we would submit to (same logic as backend)
+    // Check if already submitted for the period we would submit to (IANA timezone-based)
     const details = challengeDetailsCache[challenge.id];
     const challengeForDue = details?.challenge || challenge;
     const dueTimeLocal = challengeForDue.due?.dueTimeLocal || '23:59';
-    const timezoneOffset = challengeForDue.due?.timezoneOffset ?? new Date().getTimezoneOffset();
-    const submissionPeriodKey = dateKeys.getSubmissionPeriodDayKey(dueTimeLocal, timezoneOffset);
-    const alreadySubmittedForThisPeriod =
-      details?.allRecentCheckIns?.some(
-        (ci: any) => ci.userId === user?.id && ci.period?.dayKey === submissionPeriodKey
-      );
-    if (alreadySubmittedForThisPeriod) {
+    const adminTz = resolveAdminTimeZone(challengeForDue);
+    const isDaily = challengeForDue.cadence?.unit === 'daily';
+    const isDeadline = challengeForDue.type === 'deadline';
+    const submissionPeriodKey = isDaily
+      ? (isDeadline ? getAdminZoneDayKey(adminTz) : getCurrentPeriodDayKey(adminTz, dueTimeLocal))
+      : getCurrentPeriodWeekKey(adminTz, challengeForDue.cadence?.weekStartsOn ?? 0);
+    const myPeriodCheckIns = details?.allRecentCheckIns?.filter(
+      (ci: any) => ci.userId === user?.id && ci.status === 'completed' &&
+        (isDaily ? ci.period?.dayKey === submissionPeriodKey : ci.period?.weekKey === submissionPeriodKey)
+    ) || [];
+    const requiredCount = isDaily ? 1 : (challengeForDue.cadence?.requiredCount || 1);
+    if (myPeriodCheckIns.length >= requiredCount) {
       Alert.alert('Already Submitted', 'You have already checked in for this period!');
       return;
     }
@@ -480,14 +590,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     }
     const now = new Date();
     if (challenge.type === 'deadline' && challenge.due.deadlineDate) {
-      const deadline = new Date(challenge.due.deadlineDate);
-      const daysLeft = Math.ceil((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-      if (daysLeft > 0) {
-        return `Due in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`;
-      } else if (daysLeft === 0) {
-        return 'Due today';
-      }
-      return 'Deadline passed';
+      const deadlineTz = resolveAdminTimeZone(challenge);
+      const deadlineDueTime = challenge.due.dueTimeLocal || '23:59';
+      const deadlineMomentUtc = computeDeadlineMomentUtc(deadlineTz, challenge.due.deadlineDate, deadlineDueTime);
+      const deadlineDiffMs = deadlineMomentUtc.getTime() - now.getTime();
+      if (deadlineDiffMs <= 0) return 'Deadline passed';
+      const daysLeft = Math.ceil(deadlineDiffMs / (1000 * 60 * 60 * 24));
+      if (daysLeft === 0) return 'Due today';
+      return `Due in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`;
     }
     
     if (challenge.cadence.unit === 'daily') {
@@ -507,17 +617,25 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         return 'Completed today';
       }
       
-      // Show time remaining until due
-      const dueTimeLocal = challenge.due?.dueTimeLocal || '23:59';
-      const timeRemaining = dateKeys.getTimeRemaining(dueTimeLocal);
+      // Show time remaining until due (IANA timezone-based)
+      const dueTimeLocal2 = challenge.due?.dueTimeLocal || '23:59';
+      const tz = resolveAdminTimeZone(challenge);
+      const dayKey = getCurrentPeriodDayKey(tz, dueTimeLocal2);
+      const dueMomentUtc = computeDueMomentUtcForDay(tz, dayKey, dueTimeLocal2);
+      const diffMs = dueMomentUtc.getTime() - Date.now();
+      if (diffMs <= 0) return 'Due now';
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      const timeRemaining = diffHours > 0 ? `${diffHours}h ${diffMinutes}m` : `${diffMinutes}m`;
       return `Due in ${timeRemaining}`;
     }
     
     if (challenge.cadence.unit === 'weekly' && challenge.cadence.requiredCount) {
-      if (isChallengeCompleted(challenge)) {
-        return `${challenge.cadence.requiredCount}/${challenge.cadence.requiredCount} done this week`;
-      }
-      return `${Math.min(2, challenge.cadence.requiredCount)}/${challenge.cadence.requiredCount} done this week`;
+      const details = challengeDetailsCache[challenge.id];
+      const completedCount = details?.checkInsForCurrentPeriod?.filter(
+        (ci: any) => ci.userId === user?.id && ci.status === 'completed'
+      ).length || 0;
+      return `${completedCount}/${challenge.cadence.requiredCount} done this week`;
     }
     
     return 'In progress';
@@ -543,34 +661,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
     </View>
   );
 
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const headerHeight = scrollY.interpolate({
-    inputRange: [0, 100],
-    outputRange: [160, 108],
-    extrapolate: 'clamp',
-  });
-  const headerScale = scrollY.interpolate({
-    inputRange: [0, 100],
-    outputRange: [1, 0.59],
-    extrapolate: 'clamp',
-  });
-  const subtitleMarginBottom = scrollY.interpolate({
-    inputRange: [0, 100],
-    outputRange: [4, 32],
-    extrapolate: 'clamp',
-  });
-
-  const handleMainScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const y = e.nativeEvent.contentOffset.y;
-    if (y > 0 && scrollRef.current) {
-      // Prevent scrolling down into the content; keep it pinned while
-      // still allowing pull-down to refresh (negative offsets).
-      scrollRef.current.scrollTo({ y: 0, animated: false });
-      scrollY.setValue(0);
-    } else {
-      scrollY.setValue(y);
-    }
-  };
+  // No vertical scroll — header is fixed height
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -594,6 +685,26 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           <Sun size={20} color={colors.accent} />
         )}
       </TouchableOpacity>
+      {/* Level Pill — top center */}
+      <View style={styles.levelPillTopBar}>
+        <View style={[styles.levelPill, { backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.accent }]}>
+          <Text style={[styles.levelPillText, { color: colors.accent }]}>
+            Lv. {user?.level || 1} — {user?.levelTitle || 'Rookie'}
+          </Text>
+        </View>
+        <View style={[styles.xpBarBg, { backgroundColor: colors.accent + '20' }]}>
+          <View
+            style={[
+              styles.xpBarFill,
+              {
+                backgroundColor: colors.accent,
+                width: `${Math.min(100, ((user?.xp || 0) / GamificationService.getNextLevelXP(user?.level || 1)) * 100)}%`,
+              },
+            ]}
+          />
+        </View>
+      </View>
+
       <TouchableOpacity
         style={[
           styles.bellIcon,
@@ -607,7 +718,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         onPress={() => setShowNotifications(true)}
         activeOpacity={0.7}
       >
-        <Bell size={26} color="#FF6B35" />
+        <BellIcon size={26} color="#FF6B35" />
         {notificationCount > 0 && (
           <View style={styles.notificationBadge}>
             <Text style={styles.notificationBadgeText}>
@@ -617,30 +728,29 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         )}
       </TouchableOpacity>
 
-      {/* User Profile Section - Shrinks on scroll */}
-      <Animated.View style={[styles.userSectionWrapper, { height: headerHeight }]}>
-        <Animated.View style={[styles.userSection, { transform: [{ scale: headerScale }] }]}>
+      {/* User Profile Section */}
+      <View style={styles.userSectionWrapper}>
+        <View style={styles.userSection}>
           <Avatar
             source={user?.photoURL}
             initials={user?.displayName?.charAt(0)}
             size="xl"
             onPress={() => {
-              console.log('Avatar pressed in HomeScreen!');
               handleAvatarPress();
             }}
           />
-          <TouchableOpacity onPress={() => navigation.navigate('Settings', { user })}>
+          <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
             <Text style={[styles.userName, { color: colors.text }]}>{user?.displayName || 'Loading...'}</Text>
           </TouchableOpacity>
-          <Animated.View style={{ marginBottom: subtitleMarginBottom }}>
-            <TouchableOpacity onPress={() => navigation.navigate('Settings', { user })}>
+          <View style={{ marginBottom: 0 }}>
+            <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
               <Text style={[styles.userTitle, { color: colors.textSecondary }]}>
                 {user?.title || 'Accountability Seeker'}
               </Text>
             </TouchableOpacity>
-          </Animated.View>
-        </Animated.View>
-      </Animated.View>
+          </View>
+        </View>
+      </View>
 
       {/* Content Sections */}
       {loading ? (
@@ -648,12 +758,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
       ) : error ? (
         renderErrorState()
       ) : (
-        <Animated.ScrollView
+        <ScrollView
           ref={scrollRef}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
-          onScroll={handleMainScroll}
-          scrollEventThrottle={16}
+          scrollEnabled={false}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -665,41 +774,107 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
         >
           {/* To Do Section - always open, curved separator with dip + arrow */}
           {(() => {
-            const incompleteChallenges = challenges.filter(c => !isChallengeCompleted(c));
-            const toDoCount = incompleteChallenges.length;
+            const incompleteChallenges = challenges.filter(c => !isChallengeEnded(c) && !isChallengeCompleted(c) && !isDeadlinePassed(c));
+            const activeReminders = todayReminders.filter(r => !dismissedReminderIds.has(r.id));
+            const toDoItems: ({ kind: 'challenge'; data: Challenge } | { kind: 'reminder'; data: Reminder })[] = [
+              ...incompleteChallenges.map(c => ({ kind: 'challenge' as const, data: c })),
+              ...activeReminders.map(r => ({ kind: 'reminder' as const, data: r })),
+            ];
+            const toDoCount = toDoItems.length;
+
+            // Detect when to-do transitions to 0 and show congrats
+            if (prevToDoCountRef.current !== null && prevToDoCountRef.current > 0 && toDoCount === 0) {
+              // Use setTimeout to avoid setState during render
+              setTimeout(() => showCongratsAnimation(), 300);
+            }
+            prevToDoCountRef.current = toDoCount;
+
             return (
               <View style={styles.section}>
                 {renderSectionBlock('TO DO', toDoCount, 'todo')}
-                {incompleteChallenges.length > 0 ? (
+                {toDoItems.length > 0 ? (
                   <TiltCarousel
-                      data={incompleteChallenges}
-                      keyExtractor={(c) => c.id}
+                      data={toDoItems}
+                      keyExtractor={(item) => item.kind === 'challenge' ? item.data.id : `rem_${item.data.id}`}
                       contentPadding={Theme.layout.screenPadding}
-                      renderItem={({ item: challenge }) => {
-                        const groupName = challenge.groupId
-                          ? groups.find(g => g.id === challenge.groupId)?.name
-                          : undefined;
+                      renderItem={({ item }) => {
+                        if (item.kind === 'challenge') {
+                          const challenge = item.data;
+                          const groupName = challenge.groupId
+                            ? groups.find(g => g.id === challenge.groupId)?.name
+                            : undefined;
+                          return (
+                            <ChallengeCarouselCard
+                              challenge={challenge}
+                              groupName={groupName}
+                              groupMembers={challenge.groupId ? (groupMembers[challenge.groupId] || []).map(u => ({ id: u.id, photoURL: u.photoURL, displayName: u.displayName })) : undefined}
+                              isCompleted={false}
+                              status={getChallengeStatus(challenge)}
+                              isEliminated={isUserEliminated(challenge)}
+                              streak={getUserStreak(challenge)}
+                              onPress={() => {
+                                const cached = challengeDetailsCache[challenge.id];
+                                if (cached) {
+                                  navigation.navigate('ChallengeDetail', cached);
+                                } else {
+                                  navigation.navigate('ChallengeDetail', {
+                                    challengeId: challenge.id,
+                                    currentUserId: auth.currentUser?.uid || '',
+                                  });
+                                }
+                              }}
+                              onCheckInPress={(e) => handleCheckInPress(challenge, e)}
+                            />
+                          );
+                        }
+                        // Reminder card
+                        const reminder = item.data;
+                        const formatHour = (h: number) =>
+                          h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`;
                         return (
-                          <ChallengeCarouselCard
-                            challenge={challenge}
-                            groupName={groupName}
-                            groupMembers={challenge.groupId ? (groupMembers[challenge.groupId] || []).map(u => ({ id: u.id, photoURL: u.photoURL, displayName: u.displayName })) : undefined}
-                            isCompleted={false}
-                            status={getChallengeStatus(challenge)}
-                            isEliminated={isUserEliminated(challenge)}
-                            onPress={() => {
-                              const cached = challengeDetailsCache[challenge.id];
-                              if (cached) {
-                                navigation.navigate('ChallengeDetail', cached);
-                              } else {
-                                navigation.navigate('ChallengeDetail', {
-                                  challengeId: challenge.id,
-                                  currentUserId: auth.currentUser?.uid || '',
-                                });
-                              }
-                            }}
-                            onCheckInPress={(e) => handleCheckInPress(challenge, e)}
-                          />
+                          <View style={[styles.reminderCard, { backgroundColor: colors.card, borderColor: colors.accent }]}>
+                            <View style={styles.reminderCardRow}>
+                              <BellIcon size={18} color={colors.accent} />
+                              <Text style={[styles.reminderTitle, { color: colors.text }]} numberOfLines={1}>
+                                {reminder.title}
+                              </Text>
+                              <View style={[styles.reminderFreqBadge, { backgroundColor: colors.accent + '20' }]}>
+                                <Text style={[styles.reminderFreqText, { color: colors.accent }]}>
+                                  {reminder.frequency}
+                                </Text>
+                              </View>
+                            </View>
+                            {reminder.description ? (
+                              <Text style={[styles.reminderDesc, { color: colors.textSecondary }]} numberOfLines={2}>
+                                {reminder.description}
+                              </Text>
+                            ) : null}
+                            <View style={styles.reminderBottomRow}>
+                              <View style={styles.reminderTimesRow}>
+                                <Clock size={13} color={colors.textSecondary} />
+                                {reminder.frequency === 'daily' ? (
+                                  (reminder.schedule as number[]).map(h => (
+                                    <View key={h} style={[styles.reminderTimeChip, { backgroundColor: colors.accent + '15' }]}>
+                                      <Text style={[styles.reminderTimeText, { color: colors.accent }]}>{formatHour(h)}</Text>
+                                    </View>
+                                  ))
+                                ) : (
+                                  (reminder.schedule as { day: number; hour: number }[]).map((e, i) => (
+                                    <View key={i} style={[styles.reminderTimeChip, { backgroundColor: colors.accent + '15' }]}>
+                                      <Text style={[styles.reminderTimeText, { color: colors.accent }]}>{formatHour(e.hour)}</Text>
+                                    </View>
+                                  ))
+                                )}
+                              </View>
+                              <TouchableOpacity
+                                style={[styles.reminderDismissBtn, { borderColor: '#22C55E' }]}
+                                onPress={() => handleDismissReminder(reminder.id)}
+                                activeOpacity={0.7}
+                              >
+                                <Check size={16} color="#22C55E" />
+                              </TouchableOpacity>
+                            </View>
+                          </View>
                         );
                       }}
                     />
@@ -712,41 +887,90 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
           {/* Finished Section - always open, curved separator with dip + arrow */}
           {(() => {
-            const completedChallenges = challenges.filter(c => isChallengeCompleted(c));
-            const finishedCount = completedChallenges.length;
+            const completedChallenges = challenges.filter(c => !isChallengeEnded(c) && (isChallengeCompleted(c) || isDeadlinePassed(c)));
+            const dismissedReminders = todayReminders.filter(r => dismissedReminderIds.has(r.id));
+            const finishedItems: ({ kind: 'challenge'; data: Challenge } | { kind: 'reminder'; data: Reminder })[] = [
+              ...completedChallenges.map(c => ({ kind: 'challenge' as const, data: c })),
+              ...dismissedReminders.map(r => ({ kind: 'reminder' as const, data: r })),
+            ];
+            const finishedCount = finishedItems.length;
             return (
               <View style={[styles.section, styles.sectionFinished]}>
                 {renderSectionBlock('FINISHED', finishedCount, 'finished')}
-                {completedChallenges.length > 0 ? (
+                {finishedItems.length > 0 ? (
                   <TiltCarousel
-                      data={completedChallenges}
-                      keyExtractor={(c) => c.id}
+                      data={finishedItems}
+                      keyExtractor={(item) => item.kind === 'challenge' ? item.data.id : `rem_done_${item.data.id}`}
                       contentPadding={Theme.layout.screenPadding}
-                      renderItem={({ item: challenge }) => {
-                        const groupName = challenge.groupId
-                          ? groups.find(g => g.id === challenge.groupId)?.name
-                          : undefined;
+                      renderItem={({ item }) => {
+                        if (item.kind === 'challenge') {
+                          const challenge = item.data;
+                          const groupName = challenge.groupId
+                            ? groups.find(g => g.id === challenge.groupId)?.name
+                            : undefined;
+                          return (
+                            <ChallengeCarouselCard
+                              challenge={challenge}
+                              groupName={groupName}
+                              groupMembers={challenge.groupId ? (groupMembers[challenge.groupId] || []).map(u => ({ id: u.id, photoURL: u.photoURL, displayName: u.displayName })) : undefined}
+                              isCompleted={isChallengeCompleted(challenge) || isDeadlinePassed(challenge)}
+                              status={getChallengeStatus(challenge)}
+                              isEliminated={isUserEliminated(challenge)}
+                              streak={getUserStreak(challenge)}
+                              onPress={() => {
+                                const cached = challengeDetailsCache[challenge.id];
+                                if (cached) {
+                                  navigation.navigate('ChallengeDetail', cached);
+                                } else {
+                                  navigation.navigate('ChallengeDetail', {
+                                    challengeId: challenge.id,
+                                    currentUserId: auth.currentUser?.uid || '',
+                                  });
+                                }
+                              }}
+                              onCheckInPress={(e) => handleCheckInPress(challenge, e)}
+                            />
+                          );
+                        }
+                        // Dismissed reminder card
+                        const reminder = item.data;
+                        const formatHour = (h: number) =>
+                          h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`;
                         return (
-                          <ChallengeCarouselCard
-                            challenge={challenge}
-                            groupName={groupName}
-                            groupMembers={challenge.groupId ? (groupMembers[challenge.groupId] || []).map(u => ({ id: u.id, photoURL: u.photoURL, displayName: u.displayName })) : undefined}
-                            isCompleted={true}
-                            status={getChallengeStatus(challenge)}
-                            isEliminated={isUserEliminated(challenge)}
-                            onPress={() => {
-                              const cached = challengeDetailsCache[challenge.id];
-                              if (cached) {
-                                navigation.navigate('ChallengeDetail', cached);
-                              } else {
-                                navigation.navigate('ChallengeDetail', {
-                                  challengeId: challenge.id,
-                                  currentUserId: auth.currentUser?.uid || '',
-                                });
-                              }
-                            }}
-                            onCheckInPress={(e) => handleCheckInPress(challenge, e)}
-                          />
+                          <View style={[styles.reminderCard, { backgroundColor: colors.card, borderColor: '#22C55E', opacity: 0.7 }]}>
+                            <View style={styles.reminderCardRow}>
+                              <Check size={18} color="#22C55E" />
+                              <Text style={[styles.reminderTitle, { color: colors.textSecondary, textDecorationLine: 'line-through' }]} numberOfLines={1}>
+                                {reminder.title}
+                              </Text>
+                              <View style={[styles.reminderFreqBadge, { backgroundColor: 'rgba(34,197,94,0.15)' }]}>
+                                <Text style={[styles.reminderFreqText, { color: '#22C55E' }]}>
+                                  Done
+                                </Text>
+                              </View>
+                            </View>
+                            {reminder.description ? (
+                              <Text style={[styles.reminderDesc, { color: colors.textSecondary }]} numberOfLines={1}>
+                                {reminder.description}
+                              </Text>
+                            ) : null}
+                            <View style={styles.reminderTimesRow}>
+                              <Clock size={13} color={colors.textSecondary} />
+                              {reminder.frequency === 'daily' ? (
+                                (reminder.schedule as number[]).map(h => (
+                                  <View key={h} style={[styles.reminderTimeChip, { backgroundColor: 'rgba(34,197,94,0.1)' }]}>
+                                    <Text style={[styles.reminderTimeText, { color: '#22C55E' }]}>{formatHour(h)}</Text>
+                                  </View>
+                                ))
+                              ) : (
+                                (reminder.schedule as { day: number; hour: number }[]).map((e, i) => (
+                                  <View key={i} style={[styles.reminderTimeChip, { backgroundColor: 'rgba(34,197,94,0.1)' }]}>
+                                    <Text style={[styles.reminderTimeText, { color: '#22C55E' }]}>{formatHour(e.hour)}</Text>
+                                  </View>
+                                ))
+                              )}
+                            </View>
+                          </View>
                         );
                       }}
                     />
@@ -758,7 +982,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           })()}
           
           {/* Empty spacer trimmed so content doesn't scroll unnecessarily */}
-        </Animated.ScrollView>
+        </ScrollView>
       )}
 
       {/* Floating Action Button with Circular Speed Dial */}
@@ -843,6 +1067,195 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
           currentUserId={user.id}
         />
       )}
+
+      {/* Avatar Customization Modal */}
+      <CenteredModal
+        visible={avatarModalVisible}
+        onClose={handleCloseAvatarModal}
+        size="large"
+        scrollable
+      >
+        <View style={[avatarModalStyles.modalContent, { backgroundColor: colors.surface }]}>
+          <Text style={[avatarModalStyles.modalTitle, { color: colors.text }]}>Customize avatar</Text>
+          <Text style={[avatarModalStyles.modalSubtitle, { color: colors.textSecondary }]}>
+            Choose a style and background. Randomize or use your name for a different look.
+          </Text>
+
+          <View style={[avatarModalStyles.previewCard, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '50' }]}>
+            <Avatar source={displayPreviewUrl} initials={user?.displayName?.charAt(0)} size="xl" />
+            <View style={avatarModalStyles.randomizeRow}>
+              <TouchableOpacity
+                style={[avatarModalStyles.randomizeButton, { backgroundColor: colors.background, borderColor: colors.dividerLineTodo + '80' }]}
+                onPress={handleRandomizeAvatar}
+              >
+                <Ionicons name="shuffle" size={18} color={colors.accent} />
+                <Text style={[avatarModalStyles.randomizeButtonText, { color: colors.text }]}>Randomize</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleUseMyName} style={avatarModalStyles.useNameLink}>
+                <Text style={[avatarModalStyles.useNameLinkText, { color: colors.accent }]}>Use my name</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <Text style={[avatarModalStyles.pickerLabel, { color: colors.textSecondary }]}>Style</Text>
+          <View style={[avatarModalStyles.styleRow, { justifyContent: 'center' }]}>
+            {DICEBEAR_STYLES.map((s) => (
+              <TouchableOpacity
+                key={s.id}
+                onPress={() => { setAvatarStyle(s.id); setUseSavedAsPreview(false); }}
+                style={[
+                  avatarModalStyles.styleChip,
+                  { borderColor: colors.dividerLineTodo + '80', backgroundColor: colors.card },
+                  avatarStyle === s.id && [avatarModalStyles.styleChipActive, { borderColor: colors.accent, backgroundColor: colors.accent + '20' }],
+                ]}
+              >
+                <Text style={[avatarModalStyles.styleChipText, { color: colors.text }]} numberOfLines={1}>{s.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={[avatarModalStyles.pickerLabel, { color: colors.textSecondary }]}>Background</Text>
+          <View style={avatarModalStyles.bgRow}>
+            {DICEBEAR_BACKGROUNDS.map((hex, i) => (
+              <TouchableOpacity
+                key={hex}
+                onPress={() => { setAvatarBgIndex(i); setUseSavedAsPreview(false); }}
+                style={[
+                  avatarModalStyles.bgChip,
+                  { backgroundColor: '#' + hex },
+                  avatarBgIndex === i && [avatarModalStyles.bgChipActive, { borderColor: colors.accent }],
+                ]}
+              />
+            ))}
+          </View>
+
+          <View style={avatarModalStyles.modalActions}>
+            <TouchableOpacity
+              style={[avatarModalStyles.modalButton, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '80' }]}
+              onPress={handleCloseAvatarModal}
+            >
+              <Text style={[avatarModalStyles.modalButtonText, { color: colors.text }]}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[avatarModalStyles.modalButton, avatarModalStyles.modalButtonSave, { backgroundColor: colors.accent }]}
+              onPress={handleSaveCustomAvatar}
+              disabled={savingAvatar}
+            >
+              {savingAvatar ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Text style={avatarModalStyles.modalButtonTextWhite}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </CenteredModal>
+
+      {/* Challenge Alert Modal (eliminated / deadline ended) */}
+      <Modal
+        visible={!!alertChallenge}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAlertChallenge(null)}
+      >
+        <View style={styles.congratsOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setAlertChallenge(null)}
+          />
+          <View style={[styles.congratsCard, { backgroundColor: colors.surface }]}>
+            <Ionicons
+              name={alertChallenge?.type === 'eliminated' ? 'skull-outline' : 'flag-outline'}
+              size={48}
+              color={colors.accent}
+            />
+            <Text style={[styles.congratsTitle, { color: colors.text }]}>
+              {alertChallenge?.type === 'eliminated' ? 'Eliminated!' : 'Deadline Passed!'}
+            </Text>
+            <Text style={[styles.congratsMessage, { color: colors.textSecondary }]}>
+              {alertChallenge?.type === 'eliminated'
+                ? `You've been eliminated from "${(alertChallenge?.challenge as any)?.title || (alertChallenge?.challenge as any)?.name || 'the challenge'}".`
+                : `The deadline for "${(alertChallenge?.challenge as any)?.title || (alertChallenge?.challenge as any)?.name || 'the challenge'}" has passed. View the details!`}
+            </Text>
+            <TouchableOpacity
+              style={[styles.congratsButton, { backgroundColor: colors.accent }]}
+              onPress={() => {
+                const ch = alertChallenge?.challenge;
+                setAlertChallenge(null);
+                if (ch) {
+                  const cached = challengeDetailsCache[ch.id];
+                  if (cached) {
+                    navigation.navigate('ChallengeDetail', cached);
+                  } else {
+                    navigation.navigate('ChallengeDetail', {
+                      challengeId: ch.id,
+                      currentUserId: auth.currentUser?.uid || '',
+                    });
+                  }
+                }
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.congratsButtonText}>View Challenge</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Congrats Modal */}
+      <Modal
+        visible={showCongratsModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowCongratsModal(false)}
+      >
+        <View style={styles.congratsOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowCongratsModal(false)}
+          />
+          <Animated.View
+            style={[
+              styles.congratsCard,
+              {
+                backgroundColor: colors.surface,
+                transform: [{ scale: congratsScale }],
+                opacity: congratsOpacity,
+              },
+            ]}
+          >
+            <Animated.View
+              style={{
+                transform: [
+                  {
+                    rotate: sparkleRotation.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['0deg', '360deg'],
+                    }),
+                  },
+                ],
+              }}
+            >
+              <Sparkles size={48} color="#FFD700" />
+            </Animated.View>
+            <Text style={[styles.congratsTitle, { color: colors.text }]}>
+              All Done!
+            </Text>
+            <Text style={[styles.congratsMessage, { color: colors.textSecondary }]}>
+              {CONGRATS_MESSAGES[Math.floor(Math.random() * CONGRATS_MESSAGES.length)]}
+            </Text>
+            <TouchableOpacity
+              style={[styles.congratsButton, { backgroundColor: colors.accent }]}
+              onPress={() => setShowCongratsModal(false)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.congratsButtonText}>Awesome!</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -872,54 +1285,80 @@ const styles = StyleSheet.create({
   },
   
   userSectionWrapper: {
-    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 108,
   },
   userSection: {
     alignItems: 'center',
     paddingHorizontal: Theme.layout.screenPadding,
-    paddingTop: Theme.spacing.md,
-    paddingBottom: Theme.spacing.xs,
+    paddingTop: Theme.spacing.sm,
+    paddingBottom: 4,
   },
   userName: {
     ...Theme.typography.h2,
-    marginTop: Theme.spacing.xs,
+    marginTop: 6,
     marginBottom: 2,
     textAlign: 'center',
     color: '#000000',
   },
-  
+
   userTitle: {
     ...Theme.typography.body,
     marginBottom: 0,
     textAlign: 'center',
     color: '#666666',
   },
+  levelPillTopBar: {
+    position: 'absolute',
+    top: 63,
+    left: 70,
+    right: 70,
+    zIndex: 1000,
+    alignItems: 'center',
+    gap: 3,
+  },
+  levelPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  levelPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  xpBarBg: {
+    width: 80,
+    height: 3,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  xpBarFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
   
   scrollContent: {
     paddingHorizontal: Theme.layout.screenPadding,
-    paddingTop: Theme.spacing.sm,
+    paddingTop: 6,
     paddingBottom: 20,
   },
   section: {
-    marginBottom: Theme.spacing.lg,
+    marginBottom: 12,
   },
   sectionFinished: {
-    marginTop: -16,
+    marginTop: -6,
   },
-  
+
   sectionBlock: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 6,
+    marginBottom: 5,
   },
   sectionLabel: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     letterSpacing: 0.3,
-    marginBottom: 4,
+    marginBottom: 3,
   },
   sectionLabelTodo: {
     color: '#1A1A1A',
@@ -928,12 +1367,12 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
   },
   sectionCount: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
     borderRadius: 10,
-    minWidth: 28,
+    minWidth: 26,
     alignItems: 'center',
-    marginBottom: 2,
+    marginBottom: 1,
   },
   sectionCountTodo: {
     backgroundColor: '#FF6B35',
@@ -959,236 +1398,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   
-  userStatsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-    paddingHorizontal: Theme.spacing.xl,
-    marginTop: Theme.spacing.sm,
-  },
-  
-  badgesContainer: {
-    flexDirection: 'row',
-    gap: Theme.spacing.sm,
-    flex: 1,
-    justifyContent: 'flex-start',
-  },
-  
-  streakContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Theme.spacing.xs,
-    flex: 1,
-  },
-  
-  streakText: {
-    ...Theme.typography.h4,
-    color: Theme.colors.streak,
-    fontWeight: '600',
-  },
-  
-  pointsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Theme.spacing.xs,
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  
-  pointsText: {
-    ...Theme.typography.h4,
-    color: Theme.colors.points,
-    fontWeight: '600',
-  },
-  
-  groupCard: {
-    backgroundColor: '#FFFBF7',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 2,
-    borderColor: '#FF6B35',
-  },
-  
-  topRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  
-  overlappingAvatars: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  
-  avatarCircle: {
-    borderWidth: 2.5,
-    borderColor: '#FFFFFF',
-    borderRadius: 18,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
-  },
-  
-  extraAvatarBadge: {
-    width: 36,
-    height: 36,
-    backgroundColor: '#FF6B35',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  extraAvatarText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  
-  challengeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF9E6',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 10,
-    gap: 4,
-    borderWidth: 1,
-    borderColor: '#FFE8B3',
-  },
-  
-  challengeCount: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#333',
-  },
-  
-  groupContent: {
-    marginTop: 2,
-  },
-  
-  groupName: {
-    fontSize: 17,
-    color: '#000000',
-    fontWeight: '700',
-    marginBottom: 3,
-    letterSpacing: -0.2,
-  },
-  
-  groupDescription: {
-    fontSize: 14,
-    color: '#666666',
-    lineHeight: 20,
-  },
-  
-  arrowIcon: {
-    marginLeft: 8,
-  },
-  
-  // Challenge Card Styles (used by legacy list; carousel uses ChallengeCarouselCard)
-  challengeCard: {
-    backgroundColor: '#FFFBF7',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 2,
-  },
-  
-  challengeTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  
-  challengeTitle: {
-    fontSize: 17,
-    color: '#000000',
-    fontWeight: '700',
-    letterSpacing: -0.2,
-    marginBottom: 2,
-  },
-  challengeDate: {
-    fontSize: 13,
-    color: '#FF6B35',
-    fontWeight: '600',
-  },
-  
-  challengeIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#F5F5F5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  challengeDescription: {
-    fontSize: 14,
-    color: '#666666',
-    lineHeight: 20,
-    marginBottom: 10,
-  },
-  
-  challengeFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
-  },
-  
-  challengeStatusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-  },
-  
-  challengeStatusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#4CAF50',
-  },
-  
-  challengeStatusText: {
-    fontSize: 13,
-    color: '#333',
-    fontWeight: '600',
-  },
-  
-  checkInButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FF6B35',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    gap: 4,
-  },
-  
-  checkInButtonCompleted: {
-    backgroundColor: '#4CAF50',
-    opacity: 0.7,
-  },
-  
-  checkInButtonText: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  
-  
   emptyState: {
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: Theme.spacing.lg,
-    paddingVertical: Theme.spacing.lg,
-    minHeight: 80,
+    paddingVertical: Theme.spacing.md,
+    minHeight: 70,
   },
   
   emptyStateTitle: {
@@ -1350,4 +1565,137 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
 
-}); 
+  reminderCard: {
+    borderRadius: 14,
+    borderWidth: 1.5,
+    padding: 12,
+    marginTop: 8,
+    marginHorizontal: 2,
+  },
+  reminderCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  reminderTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    flex: 1,
+  },
+  reminderFreqBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  reminderFreqText: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  reminderDesc: {
+    fontSize: 13,
+    marginTop: 4,
+    marginLeft: 26,
+  },
+  reminderBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  reminderTimesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginLeft: 26,
+    flexWrap: 'wrap',
+    flex: 1,
+  },
+  reminderTimeChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  reminderTimeText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  reminderDismissBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+
+  congratsOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  congratsCard: {
+    width: '85%',
+    maxWidth: 400,
+    borderRadius: 28,
+    padding: 28,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+    overflow: 'hidden',
+  },
+  congratsTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  congratsMessage: {
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 21,
+    marginBottom: 24,
+    paddingHorizontal: 8,
+  },
+  congratsButton: {
+    width: '100%',
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  congratsButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+});
+
+const avatarModalStyles = StyleSheet.create({
+  modalContent: { padding: 20, paddingTop: 16 },
+  modalTitle: { fontSize: 22, fontWeight: '700', marginBottom: 4 },
+  modalSubtitle: { fontSize: 14, marginBottom: 20, lineHeight: 20 },
+  previewCard: { alignItems: 'center', paddingVertical: 20, paddingHorizontal: 16, marginBottom: 20, borderRadius: 16, borderWidth: 1 },
+  randomizeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 16 },
+  randomizeButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 16, borderRadius: 999, borderWidth: 1 },
+  randomizeButtonText: { fontSize: 14, fontWeight: '600' },
+  useNameLink: { paddingVertical: 8, paddingHorizontal: 4 },
+  useNameLinkText: { fontSize: 14, fontWeight: '600' },
+  pickerLabel: { fontSize: 13, fontWeight: '600', marginBottom: 8 },
+  styleRow: { flexDirection: 'row', flexWrap: 'nowrap', gap: 8, marginBottom: 20, alignSelf: 'center' },
+  styleChip: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1.5, alignItems: 'center' },
+  styleChipActive: { borderWidth: 2 },
+  styleChipText: { fontSize: 12, fontWeight: '600' },
+  bgRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
+  bgChip: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: 'transparent' },
+  bgChipActive: { borderWidth: 2 },
+  modalActions: { flexDirection: 'row', gap: 16, marginTop: 8 },
+  modalButton: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1 },
+  modalButtonSave: { borderWidth: 0 },
+  modalButtonText: { fontSize: 16, fontWeight: '600' },
+  modalButtonTextWhite: { fontSize: 16, fontWeight: '600', color: '#FFF' },
+});

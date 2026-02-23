@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Group, GroupInvitation, User } from '../types';
+import { AchievementService } from './achievementService';
 
 export class GroupService {
   // Create a new group (simple: just name, description, and users)
@@ -45,9 +46,13 @@ export class GroupService {
       };
 
       const docRef = await addDoc(collection(db, 'groups'), groupData);
+
+      // Achievement check (fire-and-forget)
+      AchievementService.checkAndAwardAchievements(creatorId).catch(() => {});
+
       return docRef.id;
     } catch (error) {
-      console.error('Error creating group:', error);
+      if (__DEV__) console.error('Error creating group:', error);
       throw error;
     }
   }
@@ -66,7 +71,7 @@ export class GroupService {
       }
       return null;
     } catch (error) {
-      console.error('Error getting group:', error);
+      if (__DEV__) console.error('Error getting group:', error);
       return null;
     }
   }
@@ -74,19 +79,6 @@ export class GroupService {
   // Get groups for a user
   static async getUserGroups(userId: string): Promise<Group[]> {
     try {
-      console.log('🔍 getUserGroups called with userId:', userId);
-      
-      // First, let's try a simple query without orderBy to see if the issue is with the index
-      console.log('🧪 Testing simple query first...');
-      const simpleQuery = query(
-        collection(db, 'groups'),
-        where('memberIds', 'array-contains', userId)
-      );
-      
-      const simpleSnapshot = await getDocs(simpleQuery);
-      console.log('🧪 Simple query result - Total docs:', simpleSnapshot.size);
-      
-      // Now try the full query
       const groupsQuery = query(
         collection(db, 'groups'),
         where('memberIds', 'array-contains', userId),
@@ -94,25 +86,18 @@ export class GroupService {
         orderBy('createdAt', 'desc')
       );
 
-      console.log('📋 Full query created:', groupsQuery);
-      
       const querySnapshot = await getDocs(groupsQuery);
-      console.log('📊 Full query result - Total docs:', querySnapshot.size);
-      
-      const groups = querySnapshot.docs.map(doc => {
+
+      return querySnapshot.docs.map(doc => {
         const data = doc.data();
-        console.log('📄 Group doc:', doc.id, 'memberIds:', data.memberIds, 'status:', data.status);
-        return { 
-          id: doc.id, 
+        return {
+          id: doc.id,
           ...data,
           createdAt: data.createdAt?.toDate() || new Date(),
         } as Group;
       });
-      
-      console.log('✅ Final groups array length:', groups.length);
-      return groups;
     } catch (error) {
-      console.error('❌ Error getting user groups:', error);
+      if (__DEV__) console.error('Error getting user groups:', error);
       return [];
     }
   }
@@ -125,7 +110,7 @@ export class GroupService {
         memberIds: arrayUnion(userId)
       });
     } catch (error) {
-      console.error('Error adding member:', error);
+      if (__DEV__) console.error('Error adding member:', error);
       throw error;
     }
   }
@@ -138,7 +123,7 @@ export class GroupService {
         memberIds: arrayRemove(userId)
       });
     } catch (error) {
-      console.error('Error removing member:', error);
+      if (__DEV__) console.error('Error removing member:', error);
       throw error;
     }
   }
@@ -149,7 +134,7 @@ export class GroupService {
       const groupRef = doc(db, 'groups', groupId);
       await updateDoc(groupRef, updates);
     } catch (error) {
-      console.error('Error updating group:', error);
+      if (__DEV__) console.error('Error updating group:', error);
       throw error;
     }
   }
@@ -159,7 +144,7 @@ export class GroupService {
     try {
       await deleteDoc(doc(db, 'groups', groupId));
     } catch (error) {
-      console.error('Error deleting group:', error);
+      if (__DEV__) console.error('Error deleting group:', error);
       throw error;
     }
   }
@@ -183,7 +168,7 @@ export class GroupService {
       const docRef = await addDoc(collection(db, 'groupInvitations'), invitationData);
       return docRef.id;
     } catch (error) {
-      console.error('Error creating invitation:', error);
+      if (__DEV__) console.error('Error creating invitation:', error);
       throw error;
     }
   }
@@ -204,7 +189,7 @@ export class GroupService {
         ...doc.data() 
       }) as GroupInvitation);
     } catch (error) {
-      console.error('Error getting pending invitations:', error);
+      if (__DEV__) console.error('Error getting pending invitations:', error);
       return [];
     }
   }
@@ -226,8 +211,11 @@ export class GroupService {
       
       // Add user to group
       await this.addMember(invitation.groupId, invitation.inviteeId);
+
+      // Achievement check (fire-and-forget)
+      AchievementService.checkAndAwardAchievements(invitation.inviteeId).catch(() => {});
     } catch (error) {
-      console.error('Error accepting invitation:', error);
+      if (__DEV__) console.error('Error accepting invitation:', error);
       throw error;
     }
   }
@@ -238,7 +226,7 @@ export class GroupService {
       const invitationRef = doc(db, 'groupInvitations', invitationId);
       await updateDoc(invitationRef, { status: 'declined' });
     } catch (error) {
-      console.error('Error declining invitation:', error);
+      if (__DEV__) console.error('Error declining invitation:', error);
       throw error;
     }
   }
@@ -261,16 +249,12 @@ export class GroupService {
 
   // Listen to user's groups in real-time
   static subscribeToUserGroups(userId: string, callback: (groups: Group[]) => void) {
-    console.log('🔍 subscribeToUserGroups called with userId:', userId);
-    
     const groupsQuery = query(
       collection(db, 'groups'),
       where('memberIds', 'array-contains', userId),
       where('status', '==', 'active'),
       orderBy('createdAt', 'desc')
     );
-
-    console.log('📋 Subscription query created');
 
     return onSnapshot(
       groupsQuery,

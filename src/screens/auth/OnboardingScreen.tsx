@@ -7,10 +7,8 @@ import {
   FlatList,
   Dimensions,
   ViewToken,
-  Image,
   TouchableOpacity,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -124,7 +122,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ navigation, 
         await AsyncStorage.setItem('onboardingComplete', 'true');
         navigation.replace('Main');
       } catch (error) {
-        console.error('Error saving onboarding completion:', error);
+        if (__DEV__) console.error('Error saving onboarding completion:', error);
         navigation.replace('Main');
       }
     }

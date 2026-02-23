@@ -13,6 +13,7 @@
 
 import * as admin from 'firebase-admin';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
+import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { logger } from 'firebase-functions';
 import {
   resolveAdminTimeZone,
@@ -20,16 +21,9 @@ import {
   getPreviousPeriodWeekKey,
   computeDueMomentUtcForDay,
   computeWeeklyDueMomentUtc,
-  hasPeriodDuePassed,
   wallClockToUtc,
-  getAdminZoneWeekKey,
-  getCurrentPeriodDayKey,
-  getDayKey,
-  parseKey,
-  // Legacy helpers for backward compat
-  getPreviousDayKey,
-  getPreviousWeekKey,
 } from './dateKeys';
+import { sendPushToUsers, getUserNotificationInfo } from './notifications';
 
 admin.initializeApp();
 
@@ -74,6 +68,12 @@ interface MemberDoc {
   strikes: number;
   lastEvaluatedPeriodKey?: string;
   eliminatedAt?: admin.firestore.Timestamp;
+  // Gamification
+  currentStreak?: number;
+  longestStreak?: number;
+  streakShields?: number;
+  streakShieldUsed?: boolean;
+  lastCheckInPeriodKey?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,10 +103,10 @@ async function getDisplayNames(userIds: string[]): Promise<Record<string, string
 // ---------------------------------------------------------------------------
 
 function getPreviousPeriodKey(challenge: ChallengeDoc, now: Date): string | null {
-  const cadence = challenge.cadence || { unit: 'daily', weekStartsOn: 1 };
+  const cadence = challenge.cadence || { unit: 'daily', weekStartsOn: 0 };
   const dueTimeLocal = challenge.due?.dueTimeLocal ?? '23:59';
   const adminTz = resolveAdminTimeZone(challenge);
-  const weekStartsOn = cadence.weekStartsOn ?? 1;
+  const weekStartsOn = cadence.weekStartsOn ?? 0;
 
   if (cadence.unit === 'weekly') {
     return getPreviousPeriodWeekKey(adminTz, weekStartsOn, now);
@@ -148,15 +148,9 @@ export const evaluateChallenges = onSchedule(
     logger.info('evaluateChallenges: starting', { now: now.toISOString() });
 
     try {
-      // Query all active, non-archived challenges
-      // We query by state != 'ended' to include challenges without a state field (legacy)
-      const challengesSnap = await db.collection('challenges')
-        .where('state', 'in', ['active', null])
-        .get()
-        .catch(async () => {
-          // Fallback: if the composite index doesn't exist, get all and filter
-          return db.collection('challenges').get();
-        });
+      // Query all challenges and filter client-side to include legacy docs without a state field.
+      // Firestore doesn't support `null` in `in` queries, so we fetch all and filter.
+      const challengesSnap = await db.collection('challenges').get();
 
       const challenges: ChallengeDoc[] = [];
       challengesSnap.docs.forEach(d => {
@@ -252,6 +246,22 @@ async function evaluateDeadline(challenge: ChallengeDoc, now: Date): Promise<voi
 
   await batch.commit();
   logger.info('Deadline challenge ended', { challengeId: challenge.id });
+
+  // Push notification for deadline ending
+  if (challenge.groupId) {
+    const membersSnap = await db.collection('challengeMembers')
+      .where('challengeId', '==', challenge.id)
+      .get();
+    const memberIds = membersSnap.docs.map(d => d.data().userId as string);
+    const challengeName = challenge.title || challenge.name || 'Challenge';
+    sendPushToUsers(
+      memberIds,
+      'elimination',
+      challengeName,
+      `The deadline for "${challengeName}" has passed. The challenge has ended!`,
+      { challengeId: challenge.id, groupId: challenge.groupId },
+    ).catch(err => logger.error('Push failed for deadline', err));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +272,7 @@ async function evaluateMissedCheckIns(challenge: ChallengeDoc, now: Date): Promi
   // Skip ended challenges
   if (challenge.state === 'ended') return;
 
-  const cadence = challenge.cadence || { unit: 'daily', weekStartsOn: 1 };
+  const cadence = challenge.cadence || { unit: 'daily', weekStartsOn: 0 };
   const dueTimeLocal = challenge.due?.dueTimeLocal ?? '23:59';
   const adminTz = resolveAdminTimeZone(challenge);
 
@@ -348,18 +358,56 @@ async function evaluateMissedCheckIns(challenge: ChallengeDoc, now: Date): Promi
       batchOps = 0;
     }
 
+    const memberRef = db.collection('challengeMembers').doc(member.id);
+    const memberShields = member.streakShields || 0;
+    const displayName = displayNames[member.userId] ?? 'Someone';
+
+    // --- Streak Shield Check ---
+    // If the member has streak shields, use one instead of applying miss/strike
+    if (memberShields > 0) {
+      const remainingShields = memberShields - 1;
+      batch.update(memberRef, {
+        streakShields: remainingShields,
+        streakShieldUsed: true,
+        lastEvaluatedPeriodKey: previousKey,
+      });
+      batchOps++;
+
+      // Send shield message
+      if (groupId) {
+        const msgRef = db.collection('messages').doc();
+        batch.set(msgRef, {
+          groupId,
+          userId: SYSTEM_USER_ID,
+          userName: SYSTEM_USER_NAME,
+          text: `${displayName}'s streak shield absorbed a miss! (${remainingShields} shield${remainingShields !== 1 ? 's' : ''} remaining)`,
+          type: 'text',
+          timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        batchOps++;
+      }
+      // Shield used — skip strike/elimination/reset for this member
+      continue;
+    }
+
+    // --- No shield: reset streak to 0 ---
+    const streakResetFields: Record<string, any> = {
+      currentStreak: 0,
+      streakShieldUsed: false,
+      lastEvaluatedPeriodKey: previousKey,
+    };
+
     if (isElimination) {
       const strikesAllowed = challenge.rules?.elimination?.strikesAllowed ?? 0;
       const newStrikes = member.strikes + 1;
 
       if (newStrikes > strikesAllowed) {
         // Eliminate
-        const memberRef = db.collection('challengeMembers').doc(member.id);
         batch.update(memberRef, {
+          ...streakResetFields,
           state: 'eliminated',
           strikes: newStrikes,
           eliminatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          lastEvaluatedPeriodKey: previousKey,
         });
         batchOps++;
         newlyEliminated.push(member.userId);
@@ -368,7 +416,6 @@ async function evaluateMissedCheckIns(challenge: ChallengeDoc, now: Date): Promi
         if (groupId) {
           const notifDocId = `${groupId}_${challenge.id}_${member.userId}_${previousKey}`;
           const notifRef = db.collection(NOTIFIED_COLLECTION).doc(notifDocId);
-          const displayName = displayNames[member.userId] ?? 'Someone';
           const msgRef = db.collection('messages').doc();
           batch.set(msgRef, {
             groupId,
@@ -387,13 +434,22 @@ async function evaluateMissedCheckIns(challenge: ChallengeDoc, now: Date): Promi
             notifiedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
           batchOps += 2;
+
+          // Push notification for elimination
+          const groupMemberIds = allUserIds.filter(uid => uid !== member.userId);
+          sendPushToUsers(
+            groupMemberIds,
+            'elimination',
+            challengeName,
+            `${displayName} has been eliminated!`,
+            { challengeId: challenge.id, groupId },
+          ).catch(err => logger.error('Push failed for elimination', err));
         }
       } else {
         // Increment strikes but don't eliminate yet
-        const memberRef = db.collection('challengeMembers').doc(member.id);
         batch.update(memberRef, {
+          ...streakResetFields,
           strikes: newStrikes,
-          lastEvaluatedPeriodKey: previousKey,
         });
         batchOps++;
 
@@ -403,7 +459,6 @@ async function evaluateMissedCheckIns(challenge: ChallengeDoc, now: Date): Promi
           const notifRef = db.collection(NOTIFIED_COLLECTION).doc(notifDocId);
           const notifSnap = await notifRef.get();
           if (!notifSnap.exists) {
-            const displayName = displayNames[member.userId] ?? 'Someone';
             const remainingStrikes = strikesAllowed - newStrikes;
             const msgRef = db.collection('messages').doc();
             batch.set(msgRef, {
@@ -426,13 +481,15 @@ async function evaluateMissedCheckIns(challenge: ChallengeDoc, now: Date): Promi
         }
       }
     } else {
-      // Non-elimination: just send missed check-in notification
+      // Non-elimination: just send missed check-in notification + reset streak
+      batch.update(memberRef, streakResetFields);
+      batchOps++;
+
       if (groupId) {
         const notifDocId = `${groupId}_${challenge.id}_${member.userId}_${previousKey}`;
         const notifRef = db.collection(NOTIFIED_COLLECTION).doc(notifDocId);
         const notifSnap = await notifRef.get();
         if (!notifSnap.exists) {
-          const displayName = displayNames[member.userId] ?? 'Someone';
           const msgRef = db.collection('messages').doc();
           batch.set(msgRef, {
             groupId,
@@ -452,13 +509,6 @@ async function evaluateMissedCheckIns(challenge: ChallengeDoc, now: Date): Promi
           batchOps += 2;
         }
       }
-
-      // Update lastEvaluatedPeriodKey
-      const memberRef = db.collection('challengeMembers').doc(member.id);
-      batch.update(memberRef, {
-        lastEvaluatedPeriodKey: previousKey,
-      });
-      batchOps++;
     }
   }
 
@@ -496,6 +546,15 @@ async function evaluateMissedCheckIns(challenge: ChallengeDoc, now: Date): Promi
         });
         batchOps++;
       }
+
+      // Push notification for winner
+      sendPushToUsers(
+        allUserIds,
+        'elimination',
+        challengeName,
+        `${winnerName} wins ${challengeName}!`,
+        { challengeId: challenge.id, groupId: groupId || '' },
+      ).catch(err => logger.error('Push failed for winner', err));
 
       logger.info('Winner determined', { challengeId: challenge.id, winnerId });
     } else if (remainingActive.length === 0) {
@@ -548,3 +607,189 @@ async function evaluateMissedCheckIns(challenge: ChallengeDoc, now: Date): Promi
 // ---------------------------------------------------------------------------
 
 export const processMissedCheckIns = evaluateChallenges;
+
+// ===========================================================================
+// Firestore Triggers — Push Notifications
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 7a: chat_all — new chat message → push to group members (exclude sender)
+// ---------------------------------------------------------------------------
+
+export const onNewMessage = onDocumentCreated('messages/{messageId}', async (event) => {
+  const data = event.data?.data();
+  if (!data) return;
+
+  // Skip system messages
+  if (data.type === 'system' || data.userId === SYSTEM_USER_ID) return;
+
+  const groupId = data.groupId as string | undefined;
+  if (!groupId) return;
+
+  const senderId = data.userId as string;
+  const messageText = (data.text as string || '').slice(0, 100);
+
+  try {
+    const groupSnap = await db.collection('groups').doc(groupId).get();
+    if (!groupSnap.exists) return;
+    const groupData = groupSnap.data()!;
+    const memberIds: string[] = (groupData.memberIds || []).filter(
+      (id: string) => id !== senderId,
+    );
+    if (memberIds.length === 0) return;
+
+    const senderInfo = await getUserNotificationInfo(senderId);
+    const groupName = (groupData.name as string) || 'Group';
+
+    await sendPushToUsers(
+      memberIds,
+      'chat_all',
+      groupName,
+      `${senderInfo.displayName}: ${messageText}`,
+      { groupId },
+    );
+  } catch (err) {
+    logger.error('onNewMessage push failed', err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 7b: group_checkins — new check-in → push to group members (exclude submitter)
+// ---------------------------------------------------------------------------
+
+export const onNewCheckIn = onDocumentCreated('checkIns/{checkInId}', async (event) => {
+  const data = event.data?.data();
+  if (!data) return;
+
+  const challengeId = data.challengeId as string;
+  const userId = data.userId as string;
+  if (!challengeId || !userId) return;
+
+  try {
+    const challengeSnap = await db.collection('challenges').doc(challengeId).get();
+    if (!challengeSnap.exists) return;
+    const challenge = challengeSnap.data()!;
+    const groupId = challenge.groupId as string | undefined;
+    if (!groupId) return; // Solo challenge, no one to notify
+
+    const groupSnap = await db.collection('groups').doc(groupId).get();
+    if (!groupSnap.exists) return;
+    const memberIds: string[] = (groupSnap.data()!.memberIds || []).filter(
+      (id: string) => id !== userId,
+    );
+    if (memberIds.length === 0) return;
+
+    const userInfo = await getUserNotificationInfo(userId);
+    const challengeName = (challenge.title as string) || (challenge.name as string) || 'Challenge';
+
+    await sendPushToUsers(
+      memberIds,
+      'group_checkins',
+      challengeName,
+      `${userInfo.displayName} checked in!`,
+      { challengeId, groupId },
+    );
+  } catch (err) {
+    logger.error('onNewCheckIn push failed', err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 7d: invites — group invitation → push to invitee
+// ---------------------------------------------------------------------------
+
+export const onGroupInvite = onDocumentCreated('groupInvitations/{invitationId}', async (event) => {
+  const data = event.data?.data();
+  if (!data) return;
+
+  const inviteeId = data.inviteeId as string;
+  const inviterId = data.inviterId as string;
+  const groupId = data.groupId as string;
+  if (!inviteeId || !inviterId) return;
+
+  try {
+    const inviterInfo = await getUserNotificationInfo(inviterId);
+
+    let groupName = 'a group';
+    if (groupId) {
+      const groupSnap = await db.collection('groups').doc(groupId).get();
+      if (groupSnap.exists) {
+        groupName = (groupSnap.data()!.name as string) || 'a group';
+      }
+    }
+
+    await sendPushToUsers(
+      [inviteeId],
+      'invites',
+      'Group Invite',
+      `${inviterInfo.displayName} invited you to ${groupName}`,
+      { groupId: groupId || '' },
+    );
+  } catch (err) {
+    logger.error('onGroupInvite push failed', err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 7d: invites — friend request → push to recipient
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Nudge — push notification when someone nudges another user
+// ---------------------------------------------------------------------------
+
+export const onNudge = onDocumentCreated('nudges/{nudgeId}', async (event) => {
+  const data = event.data?.data();
+  if (!data) return;
+
+  const targetUserId = data.targetUserId as string;
+  const senderUserId = data.senderUserId as string;
+  if (!targetUserId || !senderUserId) return;
+
+  try {
+    const senderInfo = await getUserNotificationInfo(senderUserId);
+    await sendPushToUsers(
+      [targetUserId],
+      'invites',
+      'Nudge!',
+      `${senderInfo.displayName} nudged you! Time to check in!`,
+      { type: 'nudge' },
+    );
+  } catch (err) {
+    logger.error('onNudge push failed', err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 7d: invites — friend request → push to recipient
+// ---------------------------------------------------------------------------
+
+export const onFriendRequest = onDocumentCreated('friendships/{friendshipId}', async (event) => {
+  const data = event.data?.data();
+  if (!data) return;
+
+  // Only notify on new pending requests
+  if (data.status !== 'pending') return;
+
+  const requestedBy = data.requestedBy as string;
+  // The other user is the recipient
+  const recipientId = data.userId1 === requestedBy
+    ? (data.userId2 as string)
+    : (data.userId1 as string);
+
+  if (!recipientId || !requestedBy) return;
+
+  try {
+    const requesterInfo = await getUserNotificationInfo(requestedBy);
+
+    await sendPushToUsers(
+      [recipientId],
+      'invites',
+      'Friend Request',
+      `${requesterInfo.displayName} wants to be friends!`,
+      {},
+    );
+  } catch (err) {
+    logger.error('onFriendRequest push failed', err);
+  }
+});

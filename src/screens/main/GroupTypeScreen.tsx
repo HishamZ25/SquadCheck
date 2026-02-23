@@ -11,10 +11,12 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Theme } from '../../constants/theme';
 import { useNavigation } from '@react-navigation/native';
+import { useColorMode } from '../../theme/ColorModeContext';
 
-type GroupType = 'elimination' | 'deadline' | 'progression';
+type GroupType = 'elimination' | 'deadline' | 'progress';
 
 export const GroupTypeScreen: React.FC = ({ route }: any) => {
+  const { colors } = useColorMode();
   const navigation = useNavigation();
   const [selectedType, setSelectedType] = useState<GroupType | null>(null);
   const isSolo = route?.params?.isSolo || false;
@@ -43,24 +45,26 @@ export const GroupTypeScreen: React.FC = ({ route }: any) => {
       <TouchableOpacity
         style={[
           styles.typeOption,
-          selectedType === 'elimination' && styles.selectedTypeOption
+          { backgroundColor: colors.surface },
+          selectedType === 'elimination' && [styles.selectedTypeOption, { backgroundColor: colors.surface }]
         ]}
         onPress={() => handleTypeSelect('elimination')}
       >
         <View style={styles.typeHeader}>
-          <Ionicons 
-            name="close-circle" 
-            size={32} 
-            color={selectedType === 'elimination' ? '#FF6B35' : '#666666'} 
+          <Ionicons
+            name="close-circle"
+            size={32}
+            color={selectedType === 'elimination' ? colors.accent : colors.textSecondary}
           />
           <Text style={[
             styles.typeTitle,
-            selectedType === 'elimination' && styles.selectedTypeTitle
+            { color: colors.textSecondary },
+            selectedType === 'elimination' && { color: colors.accent }
           ]}>
             Elimination
           </Text>
         </View>
-        <Text style={styles.typeSubtitle}>
+        <Text style={[styles.typeSubtitle, { color: colors.textSecondary }]}>
           A competition with no deadline where a user is eliminated if they miss 1 requirement
         </Text>
       </TouchableOpacity>
@@ -68,24 +72,26 @@ export const GroupTypeScreen: React.FC = ({ route }: any) => {
       <TouchableOpacity
         style={[
           styles.typeOption,
-          selectedType === 'deadline' && styles.selectedTypeOption
+          { backgroundColor: colors.surface },
+          selectedType === 'deadline' && [styles.selectedTypeOption, { backgroundColor: colors.surface }]
         ]}
         onPress={() => handleTypeSelect('deadline')}
       >
         <View style={styles.typeHeader}>
-          <Ionicons 
-            name="time" 
-            size={32} 
-            color={selectedType === 'deadline' ? '#FF6B35' : '#666666'} 
+          <Ionicons
+            name="time"
+            size={32}
+            color={selectedType === 'deadline' ? colors.accent : colors.textSecondary}
           />
           <Text style={[
             styles.typeTitle,
-            selectedType === 'deadline' && styles.selectedTypeTitle
+            { color: colors.textSecondary },
+            selectedType === 'deadline' && { color: colors.accent }
           ]}>
             Deadline
           </Text>
         </View>
-        <Text style={styles.typeSubtitle}>
+        <Text style={[styles.typeSubtitle, { color: colors.textSecondary }]}>
           Set a deadline goal and date and have users post daily updates to their progress. Winners get a share of the reward
         </Text>
       </TouchableOpacity>
@@ -93,24 +99,26 @@ export const GroupTypeScreen: React.FC = ({ route }: any) => {
       <TouchableOpacity
         style={[
           styles.typeOption,
-          selectedType === 'progression' && styles.selectedTypeOption
+          { backgroundColor: colors.surface },
+          selectedType === 'progress' && [styles.selectedTypeOption, { backgroundColor: colors.surface }]
         ]}
-        onPress={() => handleTypeSelect('progression')}
+        onPress={() => handleTypeSelect('progress')}
       >
         <View style={styles.typeHeader}>
-          <Ionicons 
-            name="trending-up" 
-            size={32} 
-            color={selectedType === 'progression' ? '#FF6B35' : '#666666'} 
+          <Ionicons
+            name="trending-up"
+            size={32}
+            color={selectedType === 'progress' ? colors.accent : colors.textSecondary}
           />
           <Text style={[
             styles.typeTitle,
-            selectedType === 'progression' && styles.selectedTypeTitle
+            { color: colors.textSecondary },
+            selectedType === 'progress' && { color: colors.accent }
           ]}>
-            Progression
+            Progress
           </Text>
         </View>
-        <Text style={styles.typeSubtitle}>
+        <Text style={[styles.typeSubtitle, { color: colors.textSecondary }]}>
           A challenge where the requirements increase at regular intervals
         </Text>
       </TouchableOpacity>
@@ -119,18 +127,18 @@ export const GroupTypeScreen: React.FC = ({ route }: any) => {
 
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: colors.background }]}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={22} color="#000" />
+            <Ionicons name="arrow-back" size={22} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.mainTitle}>Choose Challenge Type</Text>
+          <Text style={[styles.mainTitle, { color: colors.text }]}>Choose Challenge Type</Text>
           <View style={styles.placeholder} />
         </View>
-        
-        <Text style={styles.mainSubtitle}>
+
+        <Text style={[styles.mainSubtitle, { color: colors.textSecondary }]}>
           Select the type of challenge you want to create
         </Text>
 
@@ -138,9 +146,9 @@ export const GroupTypeScreen: React.FC = ({ route }: any) => {
       </ScrollView>
 
       {selectedType && (
-        <View style={styles.bottomContainer}>
-          <TouchableOpacity 
-            style={styles.continueButton}
+        <View style={[styles.bottomContainer, { backgroundColor: colors.background }]}>
+          <TouchableOpacity
+            style={[styles.continueButton, { backgroundColor: colors.accent }]}
             onPress={handleContinue}
           >
             <Text style={styles.continueButtonText}>

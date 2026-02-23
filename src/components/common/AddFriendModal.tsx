@@ -5,15 +5,16 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Input } from './Input';
-import { Button } from './Button';
 import { Avatar } from './Avatar';
 import { CenteredModal } from './CenteredModal';
 import { Theme } from '../../constants/theme';
 import { FriendshipService } from '../../services/friendshipService';
 import { User } from '../../types';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 interface AddFriendModalProps {
   visible: boolean;
@@ -26,6 +27,7 @@ export const AddFriendModal: React.FC<AddFriendModalProps> = ({
   onClose,
   currentUserId,
 }) => {
+  const { colors } = useColorMode();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResult, setSearchResult] = useState<User | null>(null);
   const [searching, setSearching] = useState(false);
@@ -42,7 +44,7 @@ export const AddFriendModal: React.FC<AddFriendModalProps> = ({
 
     try {
       const result = await FriendshipService.searchUser(searchQuery.trim());
-      
+
       if (!result) {
         Alert.alert('Not Found', 'No user found with that username or friend code');
       } else if (result.id === currentUserId) {
@@ -51,7 +53,7 @@ export const AddFriendModal: React.FC<AddFriendModalProps> = ({
         setSearchResult(result);
       }
     } catch (error: any) {
-      console.error('Error searching user:', error);
+      if (__DEV__) console.error('Error searching user:', error);
       Alert.alert('Error', error.message || 'Failed to search for user');
     } finally {
       setSearching(false);
@@ -67,7 +69,7 @@ export const AddFriendModal: React.FC<AddFriendModalProps> = ({
       Alert.alert('Success', `Friend request sent to ${searchResult.displayName}!`);
       handleClose();
     } catch (error: any) {
-      console.error('Error sending friend request:', error);
+      if (__DEV__) console.error('Error sending friend request:', error);
       Alert.alert('Error', error.message || 'Failed to send friend request');
     } finally {
       setSending(false);
@@ -82,139 +84,197 @@ export const AddFriendModal: React.FC<AddFriendModalProps> = ({
 
   return (
     <CenteredModal visible={visible} onClose={handleClose} size="medium" scrollable>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Add Friend</Text>
-        <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-          <Ionicons name="close" size={24} color="#1A1A1A" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Search Input */}
-      <View style={styles.content}>
-        <Text style={styles.label}>Enter Username or Friend Code</Text>
-        <View style={styles.searchContainer}>
-          <Input
-            placeholder="Username or Friend Code"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            variant="light"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <Button
-            title="Search"
-            onPress={handleSearch}
-            loading={searching}
-            variant="secondary"
-            style={styles.searchButton}
-          />
+      <View style={[styles.container, { backgroundColor: colors.surface }]}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: colors.text }]}>Add Friend</Text>
+          <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+            <Ionicons name="close" size={22} color={colors.textSecondary} />
+          </TouchableOpacity>
         </View>
 
-        {/* Search Result */}
-        {searchResult && (
-          <View style={styles.resultCard}>
-            <Avatar
-              source={searchResult.photoURL}
-              initials={searchResult.displayName?.charAt(0)}
-              size="lg"
+        {/* Search Input */}
+        <View style={styles.content}>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>Search by username or friend code</Text>
+          <View style={[styles.searchRow, { backgroundColor: colors.background, borderColor: colors.dividerLineTodo + '80' }]}>
+            <Ionicons name="search" size={18} color={colors.textSecondary} style={styles.searchIcon} />
+            <TextInput
+              style={[styles.searchInput, { color: colors.text }]}
+              placeholder="Username or friend code"
+              placeholderTextColor={colors.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+              onSubmitEditing={handleSearch}
+              returnKeyType="search"
             />
-            <View style={styles.resultInfo}>
-              <Text style={styles.resultName}>{searchResult.displayName}</Text>
-              <Text style={styles.resultSubtitle}>
-                {searchResult.title || 'Accountability Seeker'}
-              </Text>
-              <Text style={styles.friendCode}>
-                Friend Code: {searchResult.id.substring(0, 8)}
-              </Text>
-            </View>
-            <Button
-              title="Send Request"
-              onPress={handleSendRequest}
-              loading={sending}
-              variant="secondary"
-              size="small"
-            />
+            <TouchableOpacity
+              style={[styles.searchBtn, { backgroundColor: colors.accent }]}
+              onPress={handleSearch}
+              disabled={searching}
+              activeOpacity={0.8}
+            >
+              {searching ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Ionicons name="arrow-forward" size={18} color="#FFF" />
+              )}
+            </TouchableOpacity>
           </View>
-        )}
 
-        <Text style={styles.hint}>
-          💡 Your friend code: {currentUserId.substring(0, 8)}
-        </Text>
+          {/* Search Result */}
+          {searchResult && (
+            <View style={[styles.resultCard, { backgroundColor: colors.background, borderColor: colors.accent }]}>
+              <Avatar
+                source={searchResult.photoURL}
+                initials={searchResult.displayName?.charAt(0)}
+                size="lg"
+              />
+              <View style={styles.resultInfo}>
+                <Text style={[styles.resultName, { color: colors.text }]}>{searchResult.displayName}</Text>
+                <Text style={[styles.resultSubtitle, { color: colors.textSecondary }]}>
+                  {searchResult.title || 'Accountability Seeker'}
+                </Text>
+                <Text style={[styles.friendCode, { color: colors.accent }]}>
+                  {searchResult.id.substring(0, 8)}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.sendBtn, { backgroundColor: colors.accent }]}
+                onPress={handleSendRequest}
+                disabled={sending}
+                activeOpacity={0.8}
+              >
+                {sending ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={styles.sendBtnText}>Add</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Friend code hint */}
+          <View style={[styles.hintBox, { backgroundColor: colors.accent + '10', borderColor: colors.accent + '30' }]}>
+            <Ionicons name="finger-print-outline" size={16} color={colors.accent} />
+            <Text style={[styles.hintText, { color: colors.textSecondary }]}>
+              Your code: <Text style={[styles.hintCode, { color: colors.accent }]}>{currentUserId.substring(0, 8)}</Text>
+            </Text>
+          </View>
+        </View>
       </View>
     </CenteredModal>
   );
 };
 
 const styles = StyleSheet.create({
+  container: {
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
   },
   title: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
-    color: '#1A1A1A',
   },
   closeButton: {
-    padding: 4,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   content: {
     padding: 20,
+    gap: 16,
   },
   label: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#1A1A1A',
-    marginBottom: 12,
   },
-  searchContainer: {
-    gap: 12,
-    marginBottom: 20,
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingLeft: 12,
+    height: 48,
   },
-  searchButton: {
-    marginTop: 8,
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    height: '100%',
+  },
+  searchBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 4,
   },
   resultCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: '#FF6B35',
-    marginBottom: 20,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1.5,
     gap: 12,
   },
   resultInfo: {
     flex: 1,
   },
   resultName: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#1A1A1A',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   resultSubtitle: {
-    fontSize: 14,
-    color: '#666666',
-    marginBottom: 4,
+    fontSize: 13,
+    marginBottom: 2,
   },
   friendCode: {
-    fontSize: 12,
-    color: '#FF6B35',
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
-  hint: {
+  sendBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendBtnText: {
+    color: '#FFF',
     fontSize: 14,
-    color: '#666666',
-    textAlign: 'center',
-    backgroundColor: '#FFF5F0',
-    padding: 12,
-    borderRadius: 12,
+    fontWeight: '700',
+  },
+  hintBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  hintText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  hintCode: {
+    fontWeight: '700',
   },
 });

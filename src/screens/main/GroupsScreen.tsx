@@ -12,15 +12,14 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Theme } from '../../constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { GroupService } from '../../services/groupService';
-import { AuthService } from '../../services/authService';
 import { ChallengeService } from '../../services/challengeService';
 import { Avatar } from '../../components/common/Avatar';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { Group, User } from '../../types';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../../services/firebase';
 import { GroupCard } from '../../components/group';
 import { useColorMode } from '../../theme/ColorModeContext';
+import { useCurrentUser } from '../../contexts/UserContext';
+import { userCache } from '../../services/userCache';
 
 interface GroupsScreenProps {
   navigation: any;
@@ -28,29 +27,13 @@ interface GroupsScreenProps {
 
 export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
   const { colors } = useColorMode();
+  const { user } = useCurrentUser();
   const [groups, setGroups] = useState<Group[]>([]);
-  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [initialLoad, setInitialLoad] = useState(true);
   const [groupMembers, setGroupMembers] = useState<Record<string, User[]>>({});
   const [groupsCache, setGroupsCache] = useState<Group[] | null>(null);
   const [challengeCountByGroupId, setChallengeCountByGroupId] = useState<Record<string, number>>({});
-
-  // Load user on mount
-  useEffect(() => {
-    loadUser();
-  }, []);
-
-  const loadUser = async () => {
-    try {
-      const currentUser = await AuthService.getCurrentUser();
-      if (currentUser) {
-        setUser(currentUser);
-      }
-    } catch (error) {
-      console.error('Error loading user:', error);
-    }
-  };
 
   // Prefetch groups and members on app load
   useEffect(() => {
@@ -96,19 +79,19 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
 
   const prefetchGroups = async () => {
     if (!user) return;
-    
+
     try {
-      console.log('Prefetching groups...');
       const userGroups = await GroupService.getUserGroups(user.id);
-      
-      await loadGroupMembers(userGroups);
-      await loadChallengeCounts(userGroups);
-      
+
+      await Promise.all([
+        loadGroupMembers(userGroups),
+        loadChallengeCounts(userGroups),
+      ]);
+
       setGroupsCache(userGroups);
       setGroups(userGroups);
-      console.log('Groups prefetched successfully');
     } catch (error) {
-      console.error('Error prefetching groups:', error);
+      if (__DEV__) console.error('Error prefetching groups:', error);
     } finally {
       setLoading(false);
       setInitialLoad(false);
@@ -117,25 +100,24 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
 
   const loadGroups = async () => {
     if (!user || !user.id) {
-      console.log('⚠️ GroupsScreen: Cannot load groups - user or user.id is missing');
       setLoading(false);
       return;
     }
     
     try {
-      console.log('📥 Loading groups for user:', user.id);
       setLoading(true);
       
       const userGroups = await GroupService.getUserGroups(user.id);
-      console.log('📋 Groups returned from service:', userGroups.length);
       
       setGroups(userGroups);
       setGroupsCache(userGroups);
-      
-      await loadGroupMembers(userGroups);
-      await loadChallengeCounts(userGroups);
+
+      await Promise.all([
+        loadGroupMembers(userGroups),
+        loadChallengeCounts(userGroups),
+      ]);
     } catch (error) {
-      console.error('❌ Error loading groups:', error);
+      if (__DEV__) console.error('❌ Error loading groups:', error);
       Alert.alert('Error', 'Failed to load groups');
     } finally {
       setLoading(false);
@@ -145,57 +127,37 @@ export const GroupsScreen: React.FC<GroupsScreenProps> = ({ navigation }) => {
 
   const loadGroupMembers = async (groups: Group[]) => {
     try {
-      // Collect all unique member IDs across all groups
       const allMemberIds = new Set<string>();
       groups.forEach(group => {
         group.memberIds.forEach(id => allMemberIds.add(id));
       });
-      
-      // Fetch all members in parallel
-      const memberPromises = Array.from(allMemberIds).map(async (memberId) => {
-        try {
-          const userDoc = await getDoc(doc(db, 'users', memberId));
-          if (userDoc.exists()) {
-            return { id: memberId, data: userDoc.data() as User };
-          }
-        } catch (error) {
-          console.error('Error loading member:', memberId, error);
-        }
-        return null;
-      });
-      
-      const memberResults = await Promise.all(memberPromises);
-      
-      // Build a member lookup map
-      const memberLookup: Record<string, User> = {};
-      memberResults.forEach(result => {
-        if (result) {
-          memberLookup[result.id] = result.data;
-        }
-      });
-      
-      // Build the members map for each group
+
+      const memberLookup = await userCache.getUsers(Array.from(allMemberIds));
+
       const membersMap: Record<string, User[]> = {};
       groups.forEach(group => {
         membersMap[group.id] = group.memberIds
-          .map(id => memberLookup[id])
+          .map(id => memberLookup.get(id)!)
           .filter(Boolean);
       });
-      
+
       setGroupMembers(membersMap);
     } catch (error) {
-      console.error('Error loading group members:', error);
+      if (__DEV__) console.error('Error loading group members:', error);
     }
   };
 
   const renderGroup = ({ item }: { item: Group }) => {
     const members = groupMembers[item.id] || [];
     const challengeCount = challengeCountByGroupId[item.id] ?? 0;
+    const membersWithCurrentUser = user
+      ? members.map((m) => (m.id === user.id ? user : m))
+      : members;
 
     return (
       <GroupCard
         group={item}
-        members={members}
+        members={membersWithCurrentUser}
         challengeCount={challengeCount}
         onPress={() => navigation.navigate('GroupChat', { groupId: item.id })}
       />

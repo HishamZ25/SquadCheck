@@ -57,10 +57,10 @@ async function setMemberEliminated(
 }
 
 function getPreviousPeriodKey(challenge: Challenge): string | null {
-  const cadence = challenge.cadence || { unit: 'daily', weekStartsOn: 1 };
+  const cadence = challenge.cadence || { unit: 'daily', weekStartsOn: 0 };
   const due = challenge.due || {};
   const dueTimeLocal = due.dueTimeLocal ?? '23:59';
-  const weekStartsOn = cadence.weekStartsOn ?? 1;
+  const weekStartsOn = cadence.weekStartsOn ?? 0;
   const adminTz = resolveAdminTimeZone(challenge);
 
   if (cadence.unit === 'daily') {
@@ -242,7 +242,7 @@ export async function processMissedCheckIns(
         })
       );
     } catch (err) {
-      console.error(
+      if (__DEV__) console.error(
         '[missedCheckInService] Error processing challenge',
         challenge.id,
         err
@@ -253,7 +253,7 @@ export async function processMissedCheckIns(
 
 /**
  * Progression: when an interval completes (e.g. every N days), post "(Interval type) has increased."
- * Runs for challenges with type === 'progression' and progressionDuration / progressionIntervalType.
+ * Runs for challenges with type === 'progress' and progressionDuration / progressionIntervalType.
  */
 export async function processProgressionIntervals(
   groupId: string,
@@ -266,7 +266,7 @@ export async function processProgressionIntervals(
       const type = (challenge as any).type;
       const progressionDuration = (challenge as any).progressionDuration as number | undefined;
       const intervalType = (challenge as any).progressionIntervalType as string | undefined;
-      if (type !== 'progression' || !progressionDuration || !intervalType?.trim()) continue;
+      if (type !== 'progress' || !progressionDuration || !intervalType?.trim()) continue;
 
       const createdAt = challenge.createdAt;
       const createdMs =
@@ -302,7 +302,7 @@ export async function processProgressionIntervals(
         notifiedAt: new Date(),
       });
     } catch (err) {
-      console.error(
+      if (__DEV__) console.error(
         '[missedCheckInService] Error processing progression',
         challenge.id,
         err

@@ -6,9 +6,7 @@ import {
   SafeAreaView,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   Alert,
-  Linking,
   Platform,
   Modal,
 } from 'react-native';
@@ -23,8 +21,9 @@ import { CircleLoader } from '../../components/common/CircleLoader';
 import { GroupService } from '../../services/groupService';
 import { FriendshipService } from '../../services/friendshipService';
 import { auth } from '../../services/firebase';
+import { useColorMode } from '../../theme/ColorModeContext';
 
-type GroupType = 'elimination' | 'deadline' | 'progression';
+type GroupType = 'elimination' | 'deadline' | 'progress';
 
 interface CreateGroupScreenProps {
   navigation: any;
@@ -43,6 +42,7 @@ interface Friend {
 }
 
 export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation, route }) => {
+  const { colors } = useColorMode();
   const groupType = route?.params?.groupType || 'elimination';
   
   const [challengeTitle, setChallengeTitle] = useState('');
@@ -60,7 +60,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
   const [progressionDuration, setProgressionDuration] = useState<number>(7);
   const [intervalType, setIntervalType] = useState('');
-  const [assessmentTime, setAssessmentTime] = useState<Date>(new Date(new Date().setHours(0, 0, 0, 0)));
+  const [assessmentTime, setAssessmentTime] = useState<Date>(new Date(new Date().setHours(23, 59, 0, 0)));
   
   // Date picker states
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
@@ -74,13 +74,10 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
 
   const loadFriends = async () => {
     try {
-      console.log('🚀 Starting to load friends...');
       setLoadingFriends(true);
       const currentUser = auth.currentUser;
       if (currentUser) {
-        console.log('👤 Current user ID:', currentUser.uid);
         const userFriends = await FriendshipService.getUserFriends(currentUser.uid);
-        console.log('👥 Raw friends from service:', userFriends);
         
         const friendsWithSelection = userFriends.map(friend => ({
           id: friend.id,
@@ -89,16 +86,13 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
           selected: false
         }));
         
-        console.log('🎯 Processed friends with selection:', friendsWithSelection);
         setFriends(friendsWithSelection);
       } else {
-        console.log('❌ No current user found');
       }
     } catch (error) {
-      console.error('Error loading friends:', error);
+      if (__DEV__) console.error('Error loading friends:', error);
     } finally {
       setLoadingFriends(false);
-      console.log('🏁 Finished loading friends');
     }
   };
 
@@ -197,7 +191,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
       return;
     }
 
-    if (groupType === 'progression' && (!progressionDuration || !intervalType.trim())) {
+    if (groupType === 'progress' && (!progressionDuration || !intervalType.trim())) {
       Alert.alert('Error', 'Please fill in all progression fields');
       return;
     }
@@ -263,7 +257,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
       
       navigation.goBack();
     } catch (error) {
-      console.error('Error creating group:', error);
+      if (__DEV__) console.error('Error creating group:', error);
       Alert.alert('Error', 'Failed to create group. Please try again.');
     }
   };
@@ -323,14 +317,14 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: colors.background }]}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={22} color="#000" />
+            <Ionicons name="arrow-back" size={22} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Create New Group</Text>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Create New Group</Text>
           <View style={styles.placeholder} />
         </View>
 
@@ -348,13 +342,13 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
 
         {/* Challenge Configuration Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
             Configure {groupType.charAt(0).toUpperCase() + groupType.slice(1)} Challenge
           </Text>
 
           {groupType === 'elimination' && (
             <View>
-              <Text style={styles.configSubtitle}>
+              <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>
                 Define what happens when a user misses a requirement
               </Text>
               <Input
@@ -369,17 +363,17 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
 
           {groupType === 'deadline' && (
             <View>
-              <Text style={styles.configSubtitle}>
+              <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>
                 Set when the challenge starts and ends
               </Text>
               <View style={styles.dateRow}>
                 <View style={styles.dateInput}>
-                  <Text style={styles.dateLabel}>Start Date</Text>
-                  <TouchableOpacity 
-                    style={styles.dateButton}
+                  <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>Start Date</Text>
+                  <TouchableOpacity
+                    style={[styles.dateButton, { backgroundColor: colors.surface }]}
                     onPress={() => setShowStartDatePicker(true)}
                   >
-                    <Text style={styles.dateButtonText}>
+                    <Text style={[styles.dateButtonText, { color: colors.text }]}>
                       {startDate ? startDate.toLocaleDateString() : 'Select start date'}
                     </Text>
                     <Ionicons name="calendar" size={20} color={Theme.colors.textTertiary} />
@@ -387,12 +381,12 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
                 </View>
                 
                 <View style={styles.dateInput}>
-                  <Text style={styles.dateLabel}>End Date</Text>
-                  <TouchableOpacity 
-                    style={styles.dateButton}
+                  <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>End Date</Text>
+                  <TouchableOpacity
+                    style={[styles.dateButton, { backgroundColor: colors.surface }]}
                     onPress={() => setShowEndDatePicker(true)}
                   >
-                    <Text style={styles.dateButtonText}>
+                    <Text style={[styles.dateButtonText, { color: colors.text }]}>
                       {endDate ? endDate.toLocaleDateString() : 'Select end date'}
                     </Text>
                     <Ionicons name="calendar" size={20} color={Theme.colors.textTertiary} />
@@ -402,20 +396,20 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
             </View>
           )}
 
-          {groupType === 'progression' && (
+          {groupType === 'progress' && (
             <View>
               <View style={styles.progressionInput}>
-                <Text style={styles.configSubtitle}>
+                <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>
                   Choose the amount of time between each interval progression
                 </Text>
-                <View style={styles.numberInputContainer}>
-                  <TouchableOpacity 
+                <View style={[styles.numberInputContainer, { backgroundColor: colors.surface }]}>
+                  <TouchableOpacity
                     style={styles.numberButton}
                     onPress={() => setProgressionDuration(Math.max(1, progressionDuration - 1))}
                   >
                     <Ionicons name="remove" size={20} color={Theme.colors.white} />
                   </TouchableOpacity>
-                  <Text style={styles.numberValue}>{progressionDuration} days</Text>
+                  <Text style={[styles.numberValue, { color: colors.text }]}>{progressionDuration} days</Text>
                   <TouchableOpacity 
                     style={styles.numberButton}
                     onPress={() => setProgressionDuration(progressionDuration + 1)}
@@ -426,7 +420,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
               </View>
               
               <View style={styles.progressionInput}>
-                <Text style={styles.configSubtitle}>
+                <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>
                   What needs to increase? Cardio done? Time spent coding?
                 </Text>
                 <Input
@@ -442,14 +436,14 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
 
           {/* AI Assessment Time - shown for all types */}
           <View style={styles.assessmentTimeContainer}>
-            <Text style={styles.configSubtitle}>
+            <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>
               Choose when the AI will assess what users posted (default: midnight)
             </Text>
-            <TouchableOpacity 
-              style={styles.timeInputButton}
+            <TouchableOpacity
+              style={[styles.timeInputButton, { backgroundColor: colors.surface }]}
               onPress={() => setShowTimePicker(true)}
             >
-              <Text style={styles.timeInputButtonText}>
+              <Text style={[styles.timeInputButtonText, { color: colors.text }]}>
                 {assessmentTime.toLocaleTimeString([], { 
                   hour: '2-digit', 
                   minute: '2-digit' 
@@ -462,7 +456,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
 
         {/* Requirements & Rules Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Requirements & Rules</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Requirements & Rules</Text>
                   {requirements.map((requirement, index) => (
           <View key={index} style={styles.requirementRow}>
             <Text style={styles.bulletPoint}>*</Text>
@@ -492,15 +486,15 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
 
         {/* Rewards Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Rewards</Text>
-          
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Rewards</Text>
+
           {/* Points Reward */}
           <View style={styles.rewardItem}>
             <View style={styles.rewardHeader}>
               <Ionicons name="diamond" size={24} color={Theme.colors.points} />
-              <Text style={styles.rewardLabel}>Points Reward</Text>
+              <Text style={[styles.rewardLabel, { color: colors.text }]}>Points Reward</Text>
             </View>
-            <View style={styles.pointsSelector}>
+            <View style={[styles.pointsSelector, { backgroundColor: colors.surface }]}>
               <TouchableOpacity 
                 style={styles.pointsButton} 
                 onPress={decreasePoints}
@@ -509,7 +503,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
               >
                 <Ionicons name="remove" size={20} color={Theme.colors.white} />
               </TouchableOpacity>
-              <Text style={styles.pointsValue}>{pointsReward.toLocaleString()}</Text>
+              <Text style={[styles.pointsValue, { color: colors.text }]}>{pointsReward.toLocaleString()}</Text>
               <TouchableOpacity 
                 style={styles.pointsButton} 
                 onPress={increasePoints}
@@ -525,9 +519,9 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
           <View style={styles.rewardItem}>
             <View style={styles.rewardHeader}>
               <Ionicons name="warning" size={24} color={Theme.colors.error} />
-              <Text style={styles.rewardLabel}>Enter a Penalty</Text>
+              <Text style={[styles.rewardLabel, { color: colors.text }]}>Enter a Penalty</Text>
             </View>
-            <View style={styles.pointsSelector}>
+            <View style={[styles.pointsSelector, { backgroundColor: colors.surface }]}>
               <TouchableOpacity 
                 style={styles.pointsButton} 
                 onPress={decreasePenalty}
@@ -536,7 +530,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
               >
                 <Ionicons name="remove" size={20} color={Theme.colors.white} />
               </TouchableOpacity>
-              <Text style={styles.pointsValue}>{penaltyAmount.toLocaleString()}</Text>
+              <Text style={[styles.pointsValue, { color: colors.text }]}>{penaltyAmount.toLocaleString()}</Text>
               <TouchableOpacity 
                 style={styles.pointsButton} 
                 onPress={increasePenalty}
@@ -553,24 +547,24 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
             {/* Title Reward */}
             <View style={styles.rewardItemCompact}>
               <Ionicons name="text" size={20} color={Theme.colors.secondary} />
-              <TouchableOpacity style={styles.selectRewardButtonCompact}>
-                <Text style={styles.selectRewardTextCompact}>Select Title</Text>
+              <TouchableOpacity style={[styles.selectRewardButtonCompact, { backgroundColor: colors.surface }]}>
+                <Text style={[styles.selectRewardTextCompact, { color: colors.textSecondary }]}>Select Title</Text>
               </TouchableOpacity>
             </View>
 
             {/* Picture Reward */}
             <View style={styles.rewardItemCompact}>
               <Ionicons name="image" size={20} color={Theme.colors.secondary} />
-              <TouchableOpacity style={styles.selectRewardButtonCompact}>
-                <Text style={styles.selectRewardTextCompact}>Select Picture</Text>
+              <TouchableOpacity style={[styles.selectRewardButtonCompact, { backgroundColor: colors.surface }]}>
+                <Text style={[styles.selectRewardTextCompact, { color: colors.textSecondary }]}>Select Picture</Text>
               </TouchableOpacity>
             </View>
 
             {/* Badge Reward */}
             <View style={styles.rewardItemCompact}>
               <Ionicons name="ribbon" size={20} color={Theme.colors.secondary} />
-              <TouchableOpacity style={styles.selectRewardButtonCompact}>
-                <Text style={styles.selectRewardTextCompact}>Select Badge</Text>
+              <TouchableOpacity style={[styles.selectRewardButtonCompact, { backgroundColor: colors.surface }]}>
+                <Text style={[styles.selectRewardTextCompact, { color: colors.textSecondary }]}>Select Badge</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -578,25 +572,25 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
 
         {/* Invite Friends Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Invite Friends</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Invite Friends</Text>
 
           {loadingFriends ? (
             <View style={styles.loadingFriends}>
               <CircleLoader dotColor="#FF6B35" size="large" />
-              <Text style={styles.loadingFriendsText}>Loading friends...</Text>
+              <Text style={[styles.loadingFriendsText, { color: colors.textSecondary }]}>Loading friends...</Text>
             </View>
           ) : friends.length === 0 ? (
             <View style={styles.noFriends}>
-              <Ionicons name="people-outline" size={32} color={Theme.colors.gray400} />
-              <Text style={styles.noFriendsText}>No friends yet</Text>
-              <Text style={styles.noFriendsSubtext}>Add friends to invite them to groups</Text>
+              <Ionicons name="people-outline" size={32} color={colors.textSecondary} />
+              <Text style={[styles.noFriendsText, { color: colors.textSecondary }]}>No friends yet</Text>
+              <Text style={[styles.noFriendsSubtext, { color: colors.textSecondary }]}>Add friends to invite them to groups</Text>
             </View>
           ) : (
             <>
               {friends.map((friend) => (
                 <TouchableOpacity
                   key={friend.id}
-                  style={[styles.friendItem, friend.selected && styles.friendItemSelected]}
+                  style={[styles.friendItem, { backgroundColor: colors.surface }, friend.selected && [styles.friendItemSelected, { backgroundColor: colors.card }]]}
                   onPress={() => toggleFriendSelection(friend.id)}
                 >
                   <Avatar
@@ -604,7 +598,7 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
                     initials={friend.displayName.charAt(0)}
                     size="md"
                   />
-                  <Text style={styles.friendName}>{friend.displayName}</Text>
+                  <Text style={[styles.friendName, { color: colors.text }]}>{friend.displayName}</Text>
                   <View style={styles.selectionIndicator}>
                     {friend.selected ? (
                       <Ionicons name="checkmark-circle" size={24} color={Theme.colors.secondary} />
@@ -645,15 +639,15 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
             onRequestClose={() => setShowStartDatePicker(false)}
           >
             <View style={styles.pickerModalContainer}>
-              <View style={styles.pickerModalContent}>
-                <View style={styles.pickerModalHeader}>
+              <View style={[styles.pickerModalContent, { backgroundColor: colors.background }]}>
+                <View style={[styles.pickerModalHeader, { borderBottomColor: colors.dividerLineTodo + '60' }]}>
                   <TouchableOpacity
                     onPress={() => setShowStartDatePicker(false)}
                     style={styles.pickerModalButton}
                   >
-                    <Text style={styles.pickerModalCancelText}>Cancel</Text>
+                    <Text style={[styles.pickerModalCancelText, { color: colors.textSecondary }]}>Cancel</Text>
                   </TouchableOpacity>
-                  <Text style={styles.pickerModalTitle}>Select Start Date</Text>
+                  <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Start Date</Text>
                   <TouchableOpacity
                     onPress={() => {
                       if (startDate) {
@@ -689,15 +683,15 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
             onRequestClose={() => setShowEndDatePicker(false)}
           >
             <View style={styles.pickerModalContainer}>
-              <View style={styles.pickerModalContent}>
-                <View style={styles.pickerModalHeader}>
+              <View style={[styles.pickerModalContent, { backgroundColor: colors.background }]}>
+                <View style={[styles.pickerModalHeader, { borderBottomColor: colors.dividerLineTodo + '60' }]}>
                   <TouchableOpacity
                     onPress={() => setShowEndDatePicker(false)}
                     style={styles.pickerModalButton}
                   >
-                    <Text style={styles.pickerModalCancelText}>Cancel</Text>
+                    <Text style={[styles.pickerModalCancelText, { color: colors.textSecondary }]}>Cancel</Text>
                   </TouchableOpacity>
-                  <Text style={styles.pickerModalTitle}>Select End Date</Text>
+                  <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select End Date</Text>
                   <TouchableOpacity
                     onPress={() => {
                       if (endDate) {
@@ -738,15 +732,15 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
             onRequestClose={() => setShowTimePicker(false)}
           >
             <View style={styles.pickerModalContainer}>
-              <View style={styles.pickerModalContent}>
-                <View style={styles.pickerModalHeader}>
+              <View style={[styles.pickerModalContent, { backgroundColor: colors.background }]}>
+                <View style={[styles.pickerModalHeader, { borderBottomColor: colors.dividerLineTodo + '60' }]}>
                   <TouchableOpacity
                     onPress={() => setShowTimePicker(false)}
                     style={styles.pickerModalButton}
                   >
-                    <Text style={styles.pickerModalCancelText}>Cancel</Text>
+                    <Text style={[styles.pickerModalCancelText, { color: colors.textSecondary }]}>Cancel</Text>
                   </TouchableOpacity>
-                  <Text style={styles.pickerModalTitle}>Select Time</Text>
+                  <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Time</Text>
                   <TouchableOpacity
                     onPress={() => setShowTimePicker(false)}
                     style={styles.pickerModalButton}
@@ -1049,7 +1043,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: Theme.spacing.sm,
   },
-
 
   
   createButtonContainer: {

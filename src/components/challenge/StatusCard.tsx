@@ -30,13 +30,16 @@ export const StatusCard: React.FC<StatusCardProps> = ({ status, currentCheckIn, 
           title: 'Pending',
           subtitle: status.timeRemaining + ' left',
         };
-      case 'missed':
+      case 'missed': {
+        // missedAt can be a time like "11:59 PM" or a label like "Deadline passed" / "Challenge ended"
+        const isTimeString = /\d/.test(status.missedAt) && (status.missedAt.includes('AM') || status.missedAt.includes('PM'));
         return {
           backgroundColor: '#6B7280',
           icon: 'ellipse-outline' as const,
           title: 'Missed',
-          subtitle: 'Due at ' + status.missedAt,
+          subtitle: isTimeString ? 'Due at ' + status.missedAt : status.missedAt,
         };
+      }
       case 'eliminated':
         return {
           backgroundColor: '#666',
@@ -127,9 +130,10 @@ const styles = StyleSheet.create({
   container: {
     marginHorizontal: 16,
     marginTop: 12,
-    marginBottom: 12,
+    marginBottom: 0,
     padding: 14,
     borderRadius: 12,
+    overflow: 'hidden',
   },
   containerPending: {
     paddingVertical: 10,

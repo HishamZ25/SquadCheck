@@ -123,7 +123,7 @@ export const CheckInComposer: React.FC<CheckInComposerProps> = ({
     });
 
     if (!result.canceled && result.assets && result.assets[0]) {
-      setAttachments([...attachments, { type: 'photo', uri: result.assets[0].uri }]);
+      setAttachments([{ type: 'photo', uri: result.assets[0].uri }]);
     }
   };
 
@@ -142,7 +142,7 @@ export const CheckInComposer: React.FC<CheckInComposerProps> = ({
     });
 
     if (!result.canceled && result.assets && result.assets[0]) {
-      setAttachments([...attachments, { type: 'photo', uri: result.assets[0].uri }]);
+      setAttachments([{ type: 'photo', uri: result.assets[0].uri }]);
     }
   };
 
@@ -262,7 +262,7 @@ export const CheckInComposer: React.FC<CheckInComposerProps> = ({
       )}
 
       {inputType === 'number' && (
-        <View style={[styles.inputRow, { backgroundColor: colors.card }]}>
+        <View style={[styles.inputRow, { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.accent + '60' }]}>
           <TextInput
             style={[styles.input, { color: colors.text }]}
             value={numberValue}
@@ -276,7 +276,7 @@ export const CheckInComposer: React.FC<CheckInComposerProps> = ({
       )}
 
       {inputType === 'timer' && (
-        <View style={[styles.inputRow, { backgroundColor: colors.card }]}>
+        <View style={[styles.inputRow, { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.accent + '60' }]}>
           <Ionicons name="timer-outline" size={20} color={colors.textSecondary} />
           <TextInput
             style={[styles.input, { marginLeft: 8, color: colors.text }]}
@@ -291,7 +291,7 @@ export const CheckInComposer: React.FC<CheckInComposerProps> = ({
 
       {inputType === 'text' && (
         <TextInput
-          style={[styles.textInput, { backgroundColor: colors.card, color: colors.text }]}
+          style={[styles.textInput, { backgroundColor: colors.card, color: colors.text, borderWidth: 1, borderColor: colors.accent + '60' }]}
           value={textValue}
           onChangeText={setTextValue}
           placeholder="Add a note..."
@@ -303,34 +303,17 @@ export const CheckInComposer: React.FC<CheckInComposerProps> = ({
       {/* Attachments - required or optional (showPhotoPicker) */}
       {(requireAttachment || showPhotoPicker) && (
         <>
-          {attachments.length > 0 && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.photosScrollContent}
-              style={styles.photosScroll}
-            >
-              {attachments.map((att, idx) => (
-                <View key={idx} style={[styles.photoContainer, { width: getPhotoSize(), height: getPhotoSize() }]}>
-                  <Image source={{ uri: att.uri }} style={[styles.photo, { width: getPhotoSize(), height: getPhotoSize() }]} resizeMode="cover" />
-                  <TouchableOpacity 
-                    style={styles.removeButton}
-                    onPress={() => setAttachments(attachments.filter((_, i) => i !== idx))}
-                  >
-                    <Ionicons name="close" size={16} color="#FFF" />
-                  </TouchableOpacity>
-                </View>
-              ))}
+          {attachments.length > 0 ? (
+            <View style={[styles.photoContainer, { width: getPhotoSize(), height: getPhotoSize() }]}>
+              <Image source={{ uri: attachments[0].uri }} style={[styles.photo, { width: getPhotoSize(), height: getPhotoSize() }]} resizeMode="cover" />
               <TouchableOpacity
-                style={[styles.addMore, { width: getPhotoSize(), height: getPhotoSize(), borderColor: colors.dividerLineTodo + '99' }]}
-                onPress={handleAddAttachment}
+                style={styles.removeButton}
+                onPress={() => setAttachments([])}
               >
-                <Ionicons name="add" size={24} color={colors.textSecondary} />
+                <Ionicons name="close" size={16} color="#FFF" />
               </TouchableOpacity>
-            </ScrollView>
-          )}
-
-          {attachments.length === 0 && (
+            </View>
+          ) : (
             <TouchableOpacity style={[styles.photoButton, { borderColor: colors.accent }]} onPress={handleAddAttachment}>
               <Ionicons name="camera" size={20} color={colors.accent} />
               <Text style={[styles.photoButtonText, { color: colors.accent }]}>Add Photo</Text>
@@ -344,7 +327,7 @@ export const CheckInComposer: React.FC<CheckInComposerProps> = ({
         <View style={styles.notesSection}>
           {!compact && <Text style={[styles.notesLabel, { color: colors.textSecondary }]}>Notes (Optional)</Text>}
           <TextInput
-            style={[styles.notesInput, { backgroundColor: colors.card, color: colors.text }, compact && styles.notesInputCompact]}
+            style={[styles.notesInput, { backgroundColor: colors.card, color: colors.text, borderWidth: 1, borderColor: colors.accent + '60' }, compact && styles.notesInputCompact]}
             value={notes}
             onChangeText={setNotes}
             placeholder="Add a note..."
@@ -405,21 +388,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 12,
-    backgroundColor: '#F9F9F9',
     paddingHorizontal: 18,
     borderRadius: 12,
   },
 
   label: {
     fontSize: 18,
-    color: '#000',
     fontWeight: '600',
   },
 
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F9F9F9',
     borderRadius: 12,
     paddingHorizontal: 18,
     height: 60,
@@ -428,22 +408,18 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 20,
-    color: '#000',
   },
 
   unit: {
     fontSize: 18,
-    color: '#666',
     fontWeight: '600',
     marginLeft: 12,
   },
 
   textInput: {
-    backgroundColor: '#F9F9F9',
     borderRadius: 12,
     padding: 18,
     fontSize: 18,
-    color: '#000',
     minHeight: 120,
     textAlignVertical: 'top',
   },
@@ -464,7 +440,6 @@ const styles = StyleSheet.create({
   },
   photo: {
     borderRadius: 12,
-    backgroundColor: '#F0F0F0',
   },
 
   removeButton: {
@@ -495,18 +470,15 @@ const styles = StyleSheet.create({
     padding: 20,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#FF6B35',
     borderStyle: 'dashed',
   },
 
   photoButtonText: {
     fontSize: 18,
-    color: '#FF6B35',
     fontWeight: '600',
   },
 
   submitButton: {
-    backgroundColor: '#FF6B35',
     padding: 20,
     borderRadius: 12,
     alignItems: 'center',
@@ -514,7 +486,6 @@ const styles = StyleSheet.create({
   },
 
   submitButtonDisabled: {
-    backgroundColor: '#CCC',
   },
 
   submitText: {
@@ -558,16 +529,13 @@ const styles = StyleSheet.create({
 
   notesLabel: {
     fontSize: 18,
-    color: '#666',
     fontWeight: '600',
   },
 
   notesInput: {
-    backgroundColor: '#F9F9F9',
     borderRadius: 12,
     padding: 18,
     fontSize: 18,
-    color: '#000',
     minHeight: 120,
     textAlignVertical: 'top',
   },

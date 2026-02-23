@@ -1,7 +1,10 @@
-import React, { createContext, useContext, useMemo, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
 import { Appearance } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Mode = 'light' | 'dark';
+
+const COLOR_MODE_KEY = '@squadcheck_color_mode';
 
 type Palette = {
   background: string;
@@ -41,6 +44,7 @@ type ColorModeContextValue = {
   mode: Mode;
   colors: Palette;
   toggleMode: () => void;
+  setMode: (mode: Mode) => void;
 };
 
 const ColorModeContext = createContext<ColorModeContextValue | undefined>(undefined);
@@ -48,13 +52,28 @@ const ColorModeContext = createContext<ColorModeContextValue | undefined>(undefi
 export const ColorModeProvider = ({ children }: { children: ReactNode }) => {
   const system = Appearance.getColorScheme();
   const initialMode: Mode = system === 'dark' ? 'dark' : 'light';
-  const [mode, setMode] = useState<Mode>(initialMode);
+  const [mode, setModeState] = useState<Mode>(initialMode);
+
+  // Load saved preference on mount
+  useEffect(() => {
+    AsyncStorage.getItem(COLOR_MODE_KEY).then((saved) => {
+      if (saved === 'light' || saved === 'dark') {
+        setModeState(saved);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const setMode = (newMode: Mode) => {
+    setModeState(newMode);
+    AsyncStorage.setItem(COLOR_MODE_KEY, newMode).catch(() => {});
+  };
 
   const value = useMemo(
     () => ({
       mode,
       colors: palettes[mode],
-      toggleMode: () => setMode((prev) => (prev === 'light' ? 'dark' : 'light')),
+      toggleMode: () => setMode(mode === 'light' ? 'dark' : 'light'),
+      setMode,
     }),
     [mode]
   );
@@ -69,4 +88,3 @@ export const useColorMode = () => {
   }
   return ctx;
 };
-

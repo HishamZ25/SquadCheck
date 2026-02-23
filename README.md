@@ -1,34 +1,39 @@
-# SquadCheck 🏃‍♂️
+# SquadCheck
 
-A social accountability app built with React Native (Expo) and Firebase that helps users achieve their goals through group support and photo check-ins.
+A social accountability app built with React Native (Expo) and Firebase. Create challenges, check in daily or weekly, and hold your squad accountable.
 
-## 🎯 What is SquadCheck?
+## What is SquadCheck?
 
-SquadCheck is a mobile app that combines social accountability with visual proof. Users can:
+SquadCheck helps you and your friends stay on track with goals through group accountability. Users can:
 
-- **Join or create accountability groups** for team goals or solo challenges
-- **Submit photo check-ins** to prove they're working toward their goals
-- **Get verified by group members or AI** to ensure accountability
-- **Earn rewards and badges** for consistent progress
-- **Build lasting habits** through community support
+- **Create and join groups** with friends for shared challenges
+- **Run four challenge types** — Standard, Elimination, Progress, and Deadline
+- **Submit check-ins** with photos, numbers, text, or timers as proof
+- **Earn XP and level up** through 50 levels across 10 title tiers
+- **Build streaks** for bonus rewards and earn streak shields
+- **Unlock achievements** for milestones like total check-ins, streaks, and wins
+- **Chat in groups** with real-time messaging and check-in updates
+- **Track progress** via a calendar view and challenge history
 
-## 🛠 Tech Stack
+## Tech Stack
 
-- **Frontend**: React Native with Expo
-- **Backend**: Firebase (Auth, Firestore, Storage)
-- **AI Integration**: OpenAI GPT-4 Vision (optional)
-- **State Management**: React Hooks + Context
-- **Navigation**: React Navigation
-- **UI Components**: Custom design system with React Native Paper
+- **Frontend**: React Native with Expo (~50)
+- **Backend**: Firebase (Auth, Firestore, Storage, Cloud Functions)
+- **State Management**: React Hooks + Context (no external state library)
+- **Navigation**: React Navigation (stack-based)
+- **Animations**: React Native Reanimated
+- **Icons**: Ionicons + Lucide React Native
+- **Avatars**: DiceBear API
+- **Language**: TypeScript throughout
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
-- Node.js (v16 or higher)
+- Node.js (v18 or higher)
 - npm or yarn
-- Expo CLI (`npm install -g @expo/cli`)
-- iOS Simulator (for iOS development) or Android Studio (for Android)
+- Expo CLI (`npx expo`)
+- iOS Simulator (Mac) or Android Studio
 
 ### Installation
 
@@ -40,197 +45,82 @@ SquadCheck is a mobile app that combines social accountability with visual proof
 
 2. **Install dependencies**
    ```bash
-   npm install
-   # or
    yarn install
    ```
 
 3. **Set up Firebase**
-   - Create a new Firebase project at [firebase.google.com](https://firebase.google.com)
-   - Enable Authentication, Firestore, and Storage
-   - Download your `google-services.json` (Android) and `GoogleService-Info.plist` (iOS)
-   - Update `src/services/firebase.ts` with your Firebase config
+   - Create a Firebase project at [firebase.google.com](https://firebase.google.com)
+   - Enable Authentication (Email/Password), Firestore, and Storage
+   - Add your Firebase config to `src/services/firebase.ts`
+   - Deploy Firestore rules: `firebase deploy --only firestore:rules`
+   - Deploy Cloud Functions: `cd functions && npm install && cd .. && firebase deploy --only functions`
 
-4. **Set up OpenAI (Optional)**
-   - Get an API key from [openai.com](https://openai.com)
-   - Update the AI service configuration in `src/services/aiService.ts`
-
-5. **Start the development server**
+4. **Start the development server**
    ```bash
-   npm start
-   # or
    yarn start
    ```
 
-6. **Run on device/simulator**
+5. **Run on device/simulator**
    - Press `i` for iOS simulator
    - Press `a` for Android emulator
-   - Scan QR code with Expo Go app on your phone
+   - Scan QR code with Expo Go on your phone
 
-## 📱 App Structure
+## Project Structure
 
 ```
 src/
-├── components/          # Reusable UI components
-│   └── common/         # Button, Input, Avatar, etc.
-├── screens/            # App screens
-│   ├── auth/          # Login, SignUp
-│   └── main/          # Home, Groups, Chat, Profile
-├── services/           # Firebase and API services
+├── components/
+│   ├── challenge/      # ChallengeCarouselCard, StatusCard, HistoryStrip, CheckInComposer, MemberStatusList
+│   ├── common/         # Avatar, Button, Input, Modals, CountdownTimer, CheckInSuccessModal
+│   └── group/          # ChatMessage, ChatTab, LeaderboardTab, SettingsTab, GroupHeader
+├── constants/          # achievements, gamification (XP/levels), calendar, theme
+├── contexts/           # App-level context providers
+├── navigation/         # AppNavigator (React Navigation stack)
+├── screens/
+│   ├── auth/           # Login, SignUp, Onboarding, EmailConfirmation
+│   ├── challenge/      # ChallengeDetail, CheckIn, ChallengeGallery
+│   └── main/           # Home, Groups, Social, Calendar, Settings, CreateChallenge, Profile, Levels, Achievements, etc.
+├── services/           # Firebase service classes (auth, challenge, checkIn, group, message, gamification, achievement, notification, friendship, reminder)
+├── theme/              # ColorModeContext (light/dark mode)
 ├── types/              # TypeScript type definitions
-├── constants/          # Colors, theme, configuration
-├── hooks/              # Custom React hooks
-└── utils/              # Helper functions
+└── utils/              # dueTime (timezone), challengeEval, dateKeys, calendarGrid
+functions/
+└── src/                # Cloud Functions — 5-min scheduler for eliminations, deadlines, missed check-ins
 ```
 
-## 🔧 Configuration
+## Challenge Types
 
-### Firebase Setup
+| Type | Description |
+|---|---|
+| **Standard** | Simple daily or weekly check-ins. No penalties for missing. |
+| **Elimination** | Miss a check-in and get a strike. Too many strikes and you're eliminated. Last one standing wins. |
+| **Progress** | Targets increase over time (e.g., run further each week). |
+| **Deadline** | Reach a goal by a specific date. Check in as many times as needed before the deadline. |
 
-1. **Authentication**
-   - Enable Email/Password authentication
-   - Configure user profile fields
+## Gamification
 
-2. **Firestore Rules**
-   ```javascript
-   rules_version = '2';
-   service cloud.firestore {
-     match /databases/{database}/documents {
-       // Users can read/write their own data
-       match /users/{userId} {
-         allow read, write: if request.auth != null && request.auth.uid == userId;
-       }
-       
-       // Group members can read/write group data
-       match /groups/{groupId} {
-         allow read, write: if request.auth != null && 
-           resource.data.members[request.auth.uid] != null;
-       }
-       
-       // Check-ins can be read by group members, written by users
-       match /check-ins/{checkInId} {
-         allow read: if request.auth != null && 
-           get(/databases/$(database)/documents/groups/$(resource.data.groupId)).data.members[request.auth.uid] != null;
-         allow write: if request.auth != null && 
-           request.auth.uid == resource.data.userId;
-       }
-     }
-   }
-   ```
+- **XP System**: 10 XP per check-in + on-time bonus (+5 XP) + streak bonuses
+- **50 Levels**: 10 title tiers from Rookie to Legend
+- **Streaks**: Consecutive check-in tracking with milestones at 7, 14, 30, 60, and 100 days
+- **Streak Shields**: Earned every 7-day streak, protects against a missed check-in in elimination challenges
+- **Achievements**: Unlocked by reaching milestones (total check-ins, streaks, wins, groups)
+- **Daily Complete Bonus**: 2x XP when all daily challenges are completed
 
-3. **Storage Rules**
-   ```javascript
-   rules_version = '2';
-   service firebase.storage {
-     match /b/{bucket}/o {
-       match /check-ins/{groupId}/{fileName} {
-         allow read: if request.auth != null;
-         allow write: if request.auth != null && 
-           request.auth.uid == fileName.split('_')[1];
-       }
-     }
-   }
-   ```
+## Key Architecture Decisions
 
-## 🎨 Customization
+- **Timezone model**: IANA timezone string stored on each challenge at creation. Due times are wall-clock in the admin's timezone. All UTC conversions use `Intl.DateTimeFormat` — no external date libraries.
+- **Period keys**: Daily = `YYYY-MM-DD`, Weekly = week-start date as `YYYY-MM-DD`
+- **Cloud Functions**: A 5-minute scheduler evaluates eliminations, deadline outcomes, and missed check-ins server-side with idempotency tracking via `challengeEvalLog`.
+- **No external state manager**: Local React state + Firebase real-time listeners.
 
-### Theme & Colors
-
-Edit `src/constants/colors.ts` and `src/constants/theme.ts` to customize:
-- Color palette
-- Typography
-- Spacing
-- Shadows
-- Border radius
-
-### Components
-
-All UI components are built with a consistent design system. Modify them in `src/components/common/` to match your brand.
-
-## 📋 MVP Features
-
-### ✅ Implemented
-- User authentication (sign up/login)
-- Group creation and management
-- Photo check-in system
-- Manual verification by group members
-- Real-time updates with Firebase
-- Responsive UI with custom components
-
-### 🚧 Coming Soon
-- AI-powered image verification
-- Reward and badge system
-- Push notifications
-- Group invitations
-- Progress tracking and analytics
-
-## 🧪 Testing
+## Building for Production
 
 ```bash
-# Run linting
-npm run lint
-
-# Type checking
-npm run type-check
-
-# Start development server
-npm start
+# Build with EAS
+eas build --platform ios
+eas build --platform android
 ```
 
-## 📦 Building for Production
+## License
 
-```bash
-# Build for iOS
-expo build:ios
-
-# Build for Android
-expo build:android
-
-# Build for web
-expo build:web
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-- **Documentation**: Check the code comments and this README
-- **Issues**: Create an issue in the GitHub repository
-- **Questions**: Reach out to the development team
-
-## 🎯 Roadmap
-
-### Phase 1 (Current - MVP)
-- [x] User authentication
-- [x] Group creation and management
-- [x] Photo check-ins
-- [x] Manual verification
-- [x] Basic UI/UX
-
-### Phase 2 (Next)
-- [ ] AI image verification
-- [ ] Reward system
-- [ ] Push notifications
-- [ ] Group invitations
-- [ ] Progress tracking
-
-### Phase 3 (Future)
-- [ ] Social features
-- [ ] Advanced analytics
-- [ ] Integration with fitness apps
-- [ ] Public groups and discovery
-- [ ] Gamification elements
-
----
-
-**Built with ❤️ for accountability and personal growth**
+This project is licensed under the MIT License.

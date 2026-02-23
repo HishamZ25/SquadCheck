@@ -76,7 +76,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modal: {
-    borderRadius: 24,
+    borderRadius: 28,
+    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -84,19 +85,19 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   modalSmall: {
-    width: '80%',
-    maxWidth: 350,
+    width: '78%',
+    maxWidth: 330,
     maxHeight: '50%',
   },
   modalMedium: {
-    width: '85%',
-    maxWidth: 400,
-    maxHeight: '60%',
+    width: '82%',
+    maxWidth: 380,
+    maxHeight: '58%',
   },
   modalLarge: {
-    width: '90%',
-    maxWidth: 500,
-    maxHeight: '75%',
+    width: '86%',
+    maxWidth: 420,
+    maxHeight: '80%',
   },
   scrollContent: {
     flexGrow: 1,

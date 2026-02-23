@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, Modal, Dimensio
 import { Avatar } from '../common/Avatar';
 import { GroupChatMessage } from '../../services/messageService';
 import { Ionicons } from '@expo/vector-icons';
+import { Flame } from 'lucide-react-native';
 import { useColorMode } from '../../theme/ColorModeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -24,6 +25,7 @@ interface ChatMessageProps {
   onUpvote: (messageId: string) => void;
   onDownvote: (messageId: string, reason: string) => void;
   onAIJudge: (messageId: string) => void;
+  currentUserId?: string;
 }
 
 export const ChatMessage: React.FC<ChatMessageProps> = ({
@@ -32,6 +34,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   onUpvote,
   onDownvote,
   onAIJudge,
+  currentUserId,
 }) => {
   const { colors } = useColorMode();
   const [imageModalVisible, setImageModalVisible] = useState(false);
@@ -57,7 +60,15 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         isCheckIn && [styles.checkInMessageBubble, { backgroundColor: colors.surface, borderColor: colors.dividerLineTodo + '99' }]
       ]}>
         {!isOwn && (
-          <Text style={[styles.messageUserName, { color: colors.textSecondary }]}>{message.userName}</Text>
+          <View style={styles.userNameRow}>
+            <Text style={[styles.messageUserName, { color: colors.textSecondary }]}>{message.userName}</Text>
+            {isCheckIn && (message as any).streak >= 3 && (
+              <View style={styles.onFireBadge}>
+                <Flame size={11} color="#FF6B35" fill="#FF6B35" />
+                <Text style={styles.onFireText}>{(message as any).streak}</Text>
+              </View>
+            )}
+          </View>
         )}
 
         {isCheckIn ? (
@@ -66,6 +77,12 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               <View style={styles.challengeTitleContainer}>
                 <Ionicons name="trophy" size={16} color={colors.accent} />
                 <Text style={[styles.challengeTitle, { color: colors.accent }]}>{(message as any).challengeTitle}</Text>
+                {(message as any).streak >= 3 && (
+                  <View style={styles.onFireBadgeInline}>
+                    <Flame size={11} color="#FF6B35" fill="#FF6B35" />
+                    <Text style={styles.onFireText}>{(message as any).streak}</Text>
+                  </View>
+                )}
               </View>
             )}
 
@@ -115,9 +132,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               <View style={[styles.votingSection, { borderTopColor: colors.dividerLineTodo + '60' }]}>
                 <TouchableOpacity style={styles.voteButton} onPress={() => onUpvote(message.id)}>
                   <Ionicons
-                    name="thumbs-up"
+                    name={currentUserId && (message.upvotedBy || []).includes(currentUserId) ? 'thumbs-up' : 'thumbs-up-outline'}
                     size={18}
-                    color={(message.upvotes || 0) > 0 ? '#4CAF50' : colors.textSecondary}
+                    color={currentUserId && (message.upvotedBy || []).includes(currentUserId) ? '#4CAF50' : colors.textSecondary}
                   />
                   <Text style={[styles.voteCount, { color: colors.text }]}>{message.upvotes || 0}</Text>
                 </TouchableOpacity>
@@ -128,9 +145,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 
                 <TouchableOpacity style={styles.voteButton} onPress={() => onDownvote(message.id, '')}>
                   <Ionicons
-                    name="thumbs-down"
+                    name={currentUserId && (message.downvotedBy || []).includes(currentUserId) ? 'thumbs-down' : 'thumbs-down-outline'}
                     size={18}
-                    color={(message.downvotes || 0) > 0 ? '#F44336' : colors.textSecondary}
+                    color={currentUserId && (message.downvotedBy || []).includes(currentUserId) ? '#F44336' : colors.textSecondary}
                   />
                   <Text style={[styles.voteCount, { color: colors.text }]}>{message.downvotes || 0}</Text>
                 </TouchableOpacity>
@@ -222,11 +239,36 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  userNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
   messageUserName: {
     fontSize: 12,
     color: '#666',
-    marginBottom: 4,
     fontWeight: '600',
+  },
+  onFireBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: '#FFF3E0',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 8,
+  },
+  onFireBadgeInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginLeft: 6,
+  },
+  onFireText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FF6B35',
   },
   checkInContent: {
     gap: 12,

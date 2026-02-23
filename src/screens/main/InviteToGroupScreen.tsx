@@ -45,7 +45,7 @@ export const InviteToGroupScreen: React.FC<Props> = ({ navigation, route }) => {
       const notMembers = (friendsList || []).filter((f) => f?.id && !memberIds.includes(f.id));
       setFriends(notMembers);
     } catch (e) {
-      console.error(e);
+      if (__DEV__) console.error(e);
       Alert.alert('Error', 'Could not load friends or group.');
     } finally {
       setLoading(false);
@@ -67,7 +67,7 @@ export const InviteToGroupScreen: React.FC<Props> = ({ navigation, route }) => {
       Alert.alert('Invited', 'Your friend will see the invitation in the app.');
       setFriends((prev) => prev.filter((f) => f.id !== friendId));
     } catch (e) {
-      console.error(e);
+      if (__DEV__) console.error(e);
       Alert.alert('Error', 'Could not send invitation.');
     } finally {
       setInvitingId(null);

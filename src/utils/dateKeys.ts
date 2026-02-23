@@ -20,9 +20,9 @@ export const dateKeys = {
   /**
    * Get week start date for a given date
    * @param date - Date to get week start for
-   * @param weekStartsOn - 0=Sunday, 1=Monday (default), etc.
+   * @param weekStartsOn - 0=Sunday (default), 1=Monday, etc.
    */
-  getWeekKey(date: Date = new Date(), weekStartsOn: number = 1): string {
+  getWeekKey(date: Date = new Date(), weekStartsOn: number = 0): string {
     const currentDay = date.getDay(); // 0=Sunday, 1=Monday, etc.
     
     // Calculate days to subtract to get to week start
@@ -65,7 +65,7 @@ export const dateKeys = {
   /**
    * Get last N week keys
    */
-  getLastNWeeks(n: number, weekStartsOn: number = 1): string[] {
+  getLastNWeeks(n: number, weekStartsOn: number = 0): string[] {
     const keys: string[] = [];
     const today = new Date();
     
@@ -79,93 +79,34 @@ export const dateKeys = {
   },
 
   /**
-   * Check if due time has passed for today
-   */
-  isDueTimePassed(dueTimeLocal: string = '23:59'): boolean {
-    const now = new Date();
-    const [hours, minutes] = dueTimeLocal.split(':').map(Number);
-    
-    const dueTime = new Date(now);
-    dueTime.setHours(hours, minutes, 0, 0);
-    
-    return now > dueTime;
-  },
-
-  /**
-   * Get the current check-in period key based on due time
-   * The check-in period runs from dueTime yesterday to dueTime today
-   * Example: If due at 21:00 and it's 22:00 on Saturday, the current period is Sunday
-   */
-  getCurrentCheckInPeriod(dueTimeLocal: string = '23:59'): string {
-    const now = new Date();
-    const [hours, minutes] = dueTimeLocal.split(':').map(Number);
-    
-    // Check if we've passed today's due time
-    const todayDueTime = new Date(now);
-    todayDueTime.setHours(hours, minutes, 0, 0);
-    
-    if (now > todayDueTime) {
-      // Past due time - we're in tomorrow's check-in period
-      const tomorrow = new Date(now);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      return this.getDayKey(tomorrow);
-    } else {
-      // Before due time - we're in today's check-in period
-      return this.getDayKey(now);
-    }
-  },
-
-  /**
-   * Get the day key that would be used for a submission RIGHT NOW.
-   * Uses the same timezone-aware logic as CheckInService.submitChallengeCheckIn.
-   * Use this when checking "already submitted" so we match the period that will actually be recorded.
-   */
-  getSubmissionPeriodDayKey(
-    dueTimeLocal: string = '23:59',
-    challengeTimezoneOffset?: number
-  ): string {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    let dayKey = `${year}-${month}-${day}`;
-
-    if (dueTimeLocal && challengeTimezoneOffset !== undefined) {
-      const userOffset = now.getTimezoneOffset();
-      const [hours, minutes] = dueTimeLocal.split(':').map(Number);
-      const offsetDiff = challengeTimezoneOffset - userOffset;
-      const adjustedHours = (hours * 60 + minutes + offsetDiff) / 60;
-      const userLocalHours = Math.floor(adjustedHours);
-      const userLocalMinutes = Math.floor((adjustedHours % 1) * 60);
-      const todayDueTime = new Date(now);
-      todayDueTime.setHours(userLocalHours, userLocalMinutes, 0, 0);
-
-      if (now > todayDueTime) {
-        const tomorrow = new Date(now);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        dayKey = this.getDayKey(tomorrow);
-      }
-    } else {
-      dayKey = this.getCurrentCheckInPeriod(dueTimeLocal);
-    }
-    return dayKey;
-  },
-
-  /**
    * Get the next due Date for countdown (today or tomorrow at dueTimeLocal, or deadline date).
    * For deadline type pass deadlineDate (YYYY-MM-DD); otherwise uses dueTimeLocal.
+   * When adminTimeZone is provided, uses IANA timezone conversion for accuracy.
    */
   getNextDueDate(
     dueTimeLocal: string = '23:59',
     deadlineDate?: string | null,
-    type?: string
+    type?: string,
+    adminTimeZone?: string
   ): Date {
     const now = new Date();
+
     if (type === 'deadline' && deadlineDate) {
+      if (adminTimeZone) {
+        // Use IANA-based conversion via dueTime utils
+        const { computeDeadlineMomentUtc } = require('./dueTime');
+        return computeDeadlineMomentUtc(adminTimeZone, deadlineDate, dueTimeLocal);
+      }
       const [y, m, d] = deadlineDate.split('-').map(Number);
-      const end = new Date(y, (m || 1) - 1, d || 1, 23, 59, 59, 999);
-      return end;
+      return new Date(y, (m || 1) - 1, d || 1, 23, 59, 59, 999);
     }
+
+    if (adminTimeZone) {
+      const { getCurrentPeriodDayKey, computeDueMomentUtcForDay } = require('./dueTime');
+      const dayKey = getCurrentPeriodDayKey(adminTimeZone, dueTimeLocal, now);
+      return computeDueMomentUtcForDay(adminTimeZone, dayKey, dueTimeLocal);
+    }
+
     const [hours, minutes] = dueTimeLocal.split(':').map(Number);
     let dueTime = new Date(now);
     dueTime.setHours(hours, minutes, 0, 0);
@@ -175,35 +116,6 @@ export const dateKeys = {
       dueTime.setHours(hours, minutes, 0, 0);
     }
     return dueTime;
-  },
-
-  /**
-   * Format time remaining until due time
-   * If past due time today, calculates time until due time tomorrow
-   */
-  getTimeRemaining(dueTimeLocal: string = '23:59'): string {
-    const now = new Date();
-    const [hours, minutes] = dueTimeLocal.split(':').map(Number);
-    
-    // Try today's due time first
-    let dueTime = new Date(now);
-    dueTime.setHours(hours, minutes, 0, 0);
-    
-    // If we're past today's due time, use tomorrow's due time
-    if (now > dueTime) {
-      dueTime = new Date(now);
-      dueTime.setDate(dueTime.getDate() + 1);
-      dueTime.setHours(hours, minutes, 0, 0);
-    }
-    
-    const diffMs = dueTime.getTime() - now.getTime();
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-    
-    if (diffHours > 0) {
-      return `${diffHours}h ${diffMinutes}m`;
-    }
-    return `${diffMinutes}m`;
   },
 
   /**
@@ -220,7 +132,7 @@ export const dateKeys = {
   /**
    * Get weeks elapsed since challenge creation
    */
-  getWeeksElapsed(createdAt: number, currentWeekKey: string, weekStartsOn: number = 1): number {
+  getWeeksElapsed(createdAt: number, currentWeekKey: string, weekStartsOn: number = 0): number {
     const createdDate = new Date(createdAt);
     const createdWeekKey = this.getWeekKey(createdDate, weekStartsOn);
     const createdWeekStart = this.parseKey(createdWeekKey);

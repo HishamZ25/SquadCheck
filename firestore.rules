@@ -42,15 +42,27 @@ service cloud.firestore {
          request.auth.uid in resource.data.memberIds);
     }
 
-    // Messages
+    // Messages — only group members can read
     match /messages/{messageId} {
-      allow read: if request.auth != null;
+      allow read: if request.auth != null &&
+        resource.data.groupId != null &&
+        request.auth.uid in get(/databases/$(database)/documents/groups/$(resource.data.groupId)).data.memberIds;
       allow create: if request.auth != null &&
         request.resource.data.groupId != null &&
         request.auth.uid in get(/databases/$(database)/documents/groups/$(request.resource.data.groupId)).data.memberIds &&
         (request.auth.uid == request.resource.data.userId || request.resource.data.userId == 'system-missed');
-      allow update, delete: if request.auth != null &&
+      // Author can update/delete their own messages
+      allow delete: if request.auth != null &&
         request.auth.uid == resource.data.userId;
+      // Author can update anything; group members can update only vote fields
+      allow update: if request.auth != null && (
+        request.auth.uid == resource.data.userId
+        || (
+          resource.data.groupId != null &&
+          request.auth.uid in get(/databases/$(database)/documents/groups/$(resource.data.groupId)).data.memberIds &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['upvotes', 'downvotes', 'upvotedBy', 'downvotedBy'])
+        )
+      );
     }
 
     // Missed check-in notifications (automation tracking)
@@ -106,6 +118,14 @@ service cloud.firestore {
          request.auth.uid == resource.data.inviteeId);
     }
 
+    // Notifications (in-app) — user can read their own and update 'read' only
+    match /notifications/{notificationId} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid
+                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow create, delete: if false;  // server-only writes
+    }
+
     // Reminders
     match /reminders/{reminderId} {
       allow read, write: if request.auth != null && request.auth.uid == resource.data.userId;
@@ -130,6 +150,13 @@ service cloud.firestore {
       allow update, delete: if request.auth != null && request.auth.uid == resource.data.userId;
     }
 
+    // Nudges — authenticated users can create a nudge targeting anyone
+    match /nudges/{nudgeId} {
+      allow create: if request.auth != null &&
+        request.auth.uid == request.resource.data.senderUserId;
+      allow read, update, delete: if false;  // server-only; no client reads needed
+    }
+
     // ChallengeMembers — read all; create: self, elimination record, or challenge creator
     match /challengeMembers/{memberId} {
       allow read: if request.auth != null;
@@ -144,7 +171,15 @@ service cloud.firestore {
                 || get(/databases/$(database)/documents/challenges/$(request.resource.data.challengeId)).data.createdBy == request.auth.uid
                 || get(/databases/$(database)/documents/challenges/$(request.resource.data.challengeId)).data.adminUserId == request.auth.uid))
       );
-      allow update: if request.auth != null;
+      // Update: only the member themselves or the challenge admin
+      allow update: if request.auth != null && (
+        request.auth.uid == resource.data.userId
+        || (resource.data.challengeId != null
+            && exists(/databases/$(database)/documents/challenges/$(resource.data.challengeId))
+            && (get(/databases/$(database)/documents/challenges/$(resource.data.challengeId)).data.adminUserId == request.auth.uid
+                || get(/databases/$(database)/documents/challenges/$(resource.data.challengeId)).data.creatorId == request.auth.uid
+                || get(/databases/$(database)/documents/challenges/$(resource.data.challengeId)).data.createdBy == request.auth.uid))
+      );
       allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
     }
   }

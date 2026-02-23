@@ -4,15 +4,16 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  FlatList,
   ActivityIndicator,
+  SectionList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Avatar } from './Avatar';
 import { CenteredModal } from './CenteredModal';
-import { Theme } from '../../constants/theme';
 import { useColorMode } from '../../theme/ColorModeContext';
 import { FriendshipService } from '../../services/friendshipService';
+import { NotificationService } from '../../services/notificationService';
+import { AppNotification, NotificationType } from '../../types';
 
 interface FriendRequest {
   id: string;
@@ -26,19 +27,28 @@ interface FriendRequest {
 
 const getTimeAgo = (timestamp: any): string => {
   if (!timestamp) return 'Just now';
-  
+
   const now = new Date();
   const createdDate = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
   const diffMs = now.getTime() - createdDate.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
-  
+
   if (diffMins < 1) return 'Just now';
   if (diffMins < 60) return `${diffMins}m ago`;
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   return createdDate.toLocaleDateString();
+};
+
+const NOTIFICATION_ICONS: Record<NotificationType, string> = {
+  hour_before: 'time-outline',
+  chat_all: 'chatbubble-outline',
+  group_checkins: 'checkmark-circle-outline',
+  elimination: 'skull-outline',
+  invites: 'person-add-outline',
+  reminders: 'alarm-outline',
 };
 
 interface NotificationsModalProps {
@@ -53,23 +63,28 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
   currentUserId,
 }) => {
   const [requests, setRequests] = useState<FriendRequest[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const { colors } = useColorMode();
 
   useEffect(() => {
     if (visible) {
-      loadRequests();
+      loadAll();
     }
   }, [visible, currentUserId]);
 
-  const loadRequests = async () => {
+  const loadAll = async () => {
     setLoading(true);
     try {
-      const pendingRequests = await FriendshipService.getPendingRequests(currentUserId);
+      const [pendingRequests, inAppNotifs] = await Promise.all([
+        FriendshipService.getPendingRequests(currentUserId),
+        NotificationService.getInAppNotifications(currentUserId),
+      ]);
       setRequests(pendingRequests);
+      setNotifications(inAppNotifs);
     } catch (error) {
-      console.error('Error loading friend requests:', error);
+      if (__DEV__) console.error('Error loading notifications:', error);
     } finally {
       setLoading(false);
     }
@@ -79,10 +94,9 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
     setProcessingId(requestId);
     try {
       await FriendshipService.acceptFriendRequest(requestId, currentUserId, fromUserId);
-      // Remove from list
       setRequests(prev => prev.filter(r => r.id !== requestId));
     } catch (error: any) {
-      console.error('Error accepting friend request:', error);
+      if (__DEV__) console.error('Error accepting friend request:', error);
       alert(error.message || 'Failed to accept friend request');
     } finally {
       setProcessingId(null);
@@ -93,15 +107,30 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
     setProcessingId(requestId);
     try {
       await FriendshipService.declineFriendRequest(requestId);
-      // Remove from list
       setRequests(prev => prev.filter(r => r.id !== requestId));
     } catch (error: any) {
-      console.error('Error declining friend request:', error);
+      if (__DEV__) console.error('Error declining friend request:', error);
       alert(error.message || 'Failed to decline friend request');
     } finally {
       setProcessingId(null);
     }
   };
+
+  const handleMarkAllRead = async () => {
+    await NotificationService.markAllRead(currentUserId);
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  };
+
+  const handleNotificationTap = async (notif: AppNotification) => {
+    if (!notif.read) {
+      await NotificationService.markRead(notif.id);
+      setNotifications(prev =>
+        prev.map(n => (n.id === notif.id ? { ...n, read: true } : n)),
+      );
+    }
+  };
+
+  const hasUnread = notifications.some(n => !n.read);
 
   const renderRequest = ({ item }: { item: FriendRequest }) => {
     const isProcessing = processingId === item.id;
@@ -119,7 +148,7 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
           <Text style={[styles.requestText, { color: colors.textSecondary }]}>Wants to be Friends!</Text>
           <Text style={[styles.timeText, { color: colors.textSecondary }]}>{timeAgo}</Text>
         </View>
-        
+
         {isProcessing ? (
           <ActivityIndicator size="small" color={colors.accent} />
         ) : (
@@ -142,6 +171,49 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
     );
   };
 
+  const renderNotification = ({ item }: { item: AppNotification }) => {
+    const iconName = NOTIFICATION_ICONS[item.type] || 'notifications-outline';
+    const timeAgo = getTimeAgo(item.createdAt);
+
+    return (
+      <TouchableOpacity
+        style={[
+          styles.notifCard,
+          { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '40' },
+          !item.read && { borderLeftColor: colors.accent, borderLeftWidth: 3 },
+        ]}
+        onPress={() => handleNotificationTap(item)}
+        activeOpacity={0.7}
+      >
+        <View style={[styles.notifIconWrap, { backgroundColor: colors.accent + '20' }]}>
+          <Ionicons name={iconName as any} size={20} color={colors.accent} />
+        </View>
+        <View style={styles.notifContent}>
+          <Text
+            style={[
+              styles.notifTitle,
+              { color: colors.text },
+              !item.read && { fontWeight: '700' },
+            ]}
+            numberOfLines={1}
+          >
+            {item.title}
+          </Text>
+          <Text
+            style={[styles.notifBody, { color: colors.textSecondary }]}
+            numberOfLines={2}
+          >
+            {item.body}
+          </Text>
+          <Text style={[styles.timeText, { color: colors.textSecondary }]}>{timeAgo}</Text>
+        </View>
+        {!item.read && (
+          <View style={[styles.unreadDot, { backgroundColor: colors.accent }]} />
+        )}
+      </TouchableOpacity>
+    );
+  };
+
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
       <Ionicons name="notifications-off-outline" size={64} color={colors.textSecondary} />
@@ -152,12 +224,19 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
     </View>
   );
 
+  const isEmpty = requests.length === 0 && notifications.length === 0;
+
   return (
     <CenteredModal visible={visible} onClose={onClose} size="large">
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.dividerLineTodo + '60' }]}>
-        <Ionicons name="notifications" size={24} color={colors.accent} />
+      <View style={styles.header}>
+        <Ionicons name="notifications" size={22} color={colors.accent} />
         <Text style={[styles.title, { color: colors.text }]}>Notifications</Text>
+        {hasUnread && (
+          <TouchableOpacity onPress={handleMarkAllRead} style={styles.markAllButton}>
+            <Text style={[styles.markAllText, { color: colors.accent }]}>Mark all read</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
           <Ionicons name="close" size={24} color={colors.text} />
         </TouchableOpacity>
@@ -168,14 +247,33 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.accent} />
         </View>
+      ) : isEmpty ? (
+        renderEmpty()
       ) : (
-        <FlatList
-          data={requests}
-          renderItem={renderRequest}
-          keyExtractor={(item) => item.id}
+        <SectionList
+          sections={[
+            ...(requests.length > 0
+              ? [{ title: 'Friend Requests', data: requests as any[], type: 'request' as const }]
+              : []),
+            ...(notifications.length > 0
+              ? [{ title: 'Recent', data: notifications as any[], type: 'notification' as const }]
+              : []),
+          ]}
+          keyExtractor={(item: any) => item.id}
+          renderItem={({ item, section }: any) => {
+            if (section.type === 'request') {
+              return renderRequest({ item: item as FriendRequest });
+            }
+            return renderNotification({ item: item as AppNotification });
+          }}
+          renderSectionHeader={({ section }: any) => (
+            <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>
+              {section.title}
+            </Text>
+          )}
           contentContainerStyle={styles.listContent}
-          ListEmptyComponent={renderEmpty}
           showsVerticalScrollIndicator={false}
+          stickySectionHeadersEnabled={false}
         />
       )}
     </CenteredModal>
@@ -183,34 +281,27 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  modal: {
-    backgroundColor: '#F1F0ED',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '70%',
-  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+    gap: 10,
   },
   title: {
     flex: 1,
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '700',
-    color: '#1A1A1A',
+  },
+  markAllButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  markAllText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   closeButton: {
     padding: 4,
@@ -221,18 +312,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   listContent: {
-    padding: 20,
-    paddingBottom: 40,
+    padding: 16,
+    paddingBottom: 28,
   },
+  sectionHeader: {
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  // Friend request card
   requestCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
     borderWidth: 2,
-    borderColor: '#FF6B35',
     gap: 12,
   },
   requestInfo: {
@@ -241,17 +339,14 @@ const styles = StyleSheet.create({
   requestName: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#1A1A1A',
     marginBottom: 4,
   },
   requestText: {
     fontSize: 14,
-    color: '#666666',
     marginBottom: 2,
   },
   timeText: {
     fontSize: 12,
-    color: '#999999',
   },
   actions: {
     flexDirection: 'row',
@@ -273,6 +368,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // In-app notification card
+  notifCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    gap: 10,
+  },
+  notifIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notifContent: {
+    flex: 1,
+  },
+  notifTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  notifBody: {
+    fontSize: 13,
+    lineHeight: 17,
+    marginBottom: 2,
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  // Empty state
   emptyContainer: {
     padding: 40,
     alignItems: 'center',
@@ -281,13 +412,11 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#1A1A1A',
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: '#666666',
     textAlign: 'center',
   },
 });

@@ -35,11 +35,12 @@ interface HistoryStripProps {
   challengeCreatedAt: Date | number;
   selectedDayKey?: string | null;
   dueTimeLocal?: string; // Due time to calculate current check-in period
+  currentPeriodKey?: string; // IANA-aware "today" key from the challenge
 }
 
 export const HistoryStrip: React.FC<HistoryStripProps> = ({
   cadenceUnit,
-  weekStartsOn = 1,
+  weekStartsOn = 0,
   requiredCount = 1,
   myRecentCheckIns,
   unitLabel,
@@ -48,6 +49,7 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
   challengeCreatedAt,
   selectedDayKey,
   dueTimeLocal = '23:59',
+  currentPeriodKey: currentPeriodKeyProp,
 }) => {
   const { colors } = useColorMode();
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
@@ -56,18 +58,22 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
 
   const getPeriodKeys = () => {
     if (cadenceUnit === 'daily') {
-      // Use TODAY (not check-in period) for display
-      const today = new Date();
-      const currentDate = new Date(today);
-      
-      // Apply week offset from today
-      currentDate.setDate(currentDate.getDate() + (weekOffset * 7));
-      
+      // Anchor to the current period key so the strip always shows the week containing it
+      let anchorDate: Date;
+      if (weekOffset === 0 && currentPeriodKeyProp) {
+        anchorDate = new Date(currentPeriodKeyProp + 'T12:00:00');
+      } else {
+        // For non-zero offsets, start from currentPeriodKey and offset from there
+        const base = currentPeriodKeyProp ? new Date(currentPeriodKeyProp + 'T12:00:00') : new Date();
+        anchorDate = new Date(base);
+        anchorDate.setDate(anchorDate.getDate() + (weekOffset * 7));
+      }
+
       // Find the Sunday of this week
-      const dayOfWeek = currentDate.getDay();
-      const sunday = new Date(currentDate);
-      sunday.setDate(currentDate.getDate() - dayOfWeek);
-      
+      const dayOfWeek = anchorDate.getDay();
+      const sunday = new Date(anchorDate);
+      sunday.setDate(anchorDate.getDate() - dayOfWeek);
+
       // Generate 7 days from Sunday to Saturday
       const days = [];
       for (let i = 0; i < 7; i++) {
@@ -102,29 +108,26 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
   };
 
   const isValidChallengePeriod = (periodKey: string): boolean => {
-    const creationDate = typeof challengeCreatedAt === 'number' 
-      ? new Date(challengeCreatedAt) 
+    const creationDate = typeof challengeCreatedAt === 'number'
+      ? new Date(challengeCreatedAt)
       : challengeCreatedAt;
     creationDate.setHours(0, 0, 0, 0);
-    
-    // Today at end of day
-    const today = new Date();
-    today.setHours(23, 59, 59, 999);
-    
-    // Today at start of day (for comparison)
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    
+
+    // Use the IANA-aware current period key for "today" boundary
+    const todayKey = currentPeriodKeyProp || dateKeys.getDayKey(new Date());
+    const todayDate = new Date(todayKey + 'T12:00:00');
+    todayDate.setHours(0, 0, 0, 0);
+
     if (cadenceUnit === 'daily') {
       const periodDate = new Date(periodKey + 'T12:00:00');
       periodDate.setHours(0, 0, 0, 0);
-      
-      // Must be >= creation date AND <= today (not future)
-      return periodDate >= creationDate && periodDate <= todayStart;
+
+      // Must be >= creation date AND <= current period (not future)
+      return periodDate >= creationDate && periodDate <= todayDate;
     } else {
       const weekStart = dateKeys.parseKey(periodKey);
       weekStart.setHours(0, 0, 0, 0);
-      return weekStart >= creationDate && weekStart <= todayStart;
+      return weekStart >= creationDate && weekStart <= todayDate;
     }
   };
 
@@ -138,17 +141,14 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
 
     if (cadenceUnit === 'daily') {
       if (completedCount > 0) return 'completed';
-      
-      const periodDate = new Date(periodKey);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      return periodDate < today ? 'missed' : 'empty';
+
+      const todayKey = currentPeriodKeyProp || dateKeys.getDayKey(new Date());
+      return periodKey < todayKey ? 'missed' : 'empty';
     } else {
       if (completedCount >= requiredCount) return 'completed';
       if (completedCount > 0) return 'partial';
-      
-      const currentWeekKey = dateKeys.getWeekKey(new Date(), weekStartsOn);
+
+      const currentWeekKey = currentPeriodKeyProp || dateKeys.getWeekKey(new Date(), weekStartsOn);
       return periodKey < currentWeekKey ? 'missed' : 'empty';
     }
   };
@@ -160,7 +160,7 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
       case 'partial':
         return { backgroundColor: '#FF9800', icon: 'remove' as const, textColor: '#FFF' };
       case 'missed':
-        return { backgroundColor: '#F44336', icon: 'close' as const, textColor: '#FFF' };
+        return { backgroundColor: '#D4D4D4', icon: 'close' as const, textColor: '#888' };
       case 'empty':
         return { backgroundColor: '#F0F0F0', icon: null, textColor: '#999' };
       case 'invalid':
@@ -234,8 +234,8 @@ export const HistoryStrip: React.FC<HistoryStripProps> = ({
 
             if (cadenceUnit === 'daily') {
               const { dayName, dayNumber} = formatDayLabel(periodKey);
-              const today = dateKeys.getDayKey(new Date());
-              const isToday = periodKey === today;
+              const todayKey = currentPeriodKeyProp || dateKeys.getDayKey(new Date());
+              const isToday = periodKey === todayKey;
               const isSelected = periodKey === selectedDayKey;
 
               return (

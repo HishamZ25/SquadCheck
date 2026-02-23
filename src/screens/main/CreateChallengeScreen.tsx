@@ -6,7 +6,6 @@ import {
   SafeAreaView,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   Alert,
   Platform,
   Modal,
@@ -26,7 +25,7 @@ import { auth } from '../../services/firebase';
 import { Group } from '../../types';
 import { useColorMode } from '../../theme/ColorModeContext';
 
-type ChallengeType = 'elimination' | 'deadline' | 'progression';
+type ChallengeType = 'elimination' | 'deadline' | 'progress';
 
 interface CreateChallengeScreenProps {
   navigation: any;
@@ -62,12 +61,27 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
   const [progressionDuration, setProgressionDuration] = useState<number>(7);
   const [intervalType, setIntervalType] = useState('');
-  const [assessmentTime, setAssessmentTime] = useState<Date>(new Date(new Date().setHours(0, 0, 0, 0)));
+  const [assessmentTime, setAssessmentTime] = useState<Date>(new Date(new Date().setHours(23, 59, 0, 0)));
   
   // Date picker states
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Cadence
+  const [cadenceUnit, setCadenceUnit] = useState<'daily' | 'weekly'>('daily');
+  const [weeklyCount, setWeeklyCount] = useState(3);
+  const [weekStartsOn, setWeekStartsOn] = useState(1); // 1=Monday
+
+  // Submission type
+  const [inputType, setInputType] = useState<'boolean' | 'number' | 'text' | 'timer'>('boolean');
+  const [unitLabel, setUnitLabel] = useState('');
+  const [minValue, setMinValue] = useState<number | undefined>(undefined);
+  const [requireAttachment, setRequireAttachment] = useState(false);
+
+  // Strikes (elimination only)
+  const [strikesAllowed, setStrikesAllowed] = useState(0);
 
   // Mode selection: 'friends' or 'group'
   const [participantMode, setParticipantMode] = useState<'friends' | 'group'>('friends');
@@ -103,7 +117,7 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
         setFriends(friendsWithSelection);
       }
     } catch (error) {
-      console.error('Error loading friends:', error);
+      if (__DEV__) console.error('Error loading friends:', error);
     }
   };
 
@@ -118,7 +132,7 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
         await loadChallengeCounts(groups);
       }
     } catch (error) {
-      console.error('Error loading user groups:', error);
+      if (__DEV__) console.error('Error loading user groups:', error);
     }
   };
 
@@ -201,6 +215,7 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
   };
 
   const handleCreateChallenge = async () => {
+    if (isSubmitting) return;
     if (!challengeTitle.trim() || !description.trim()) {
       Alert.alert('Missing Information', 'Please fill in the challenge title and description.');
       return;
@@ -217,7 +232,7 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
       return;
     }
 
-    if (challengeType === 'progression' && (!progressionDuration || !intervalType.trim())) {
+    if (challengeType === 'progress' && (!progressionDuration || !intervalType.trim())) {
       Alert.alert('Error', 'Please fill in all progression fields');
       return;
     }
@@ -238,10 +253,12 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
       }
     }
 
+    setIsSubmitting(true);
     try {
       const currentUser = auth.currentUser;
       if (!currentUser) {
         Alert.alert('Error', 'You must be logged in to create a challenge.');
+        setIsSubmitting(false);
         return;
       }
 
@@ -271,17 +288,26 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
         isSolo ? 'solo' : 'group',
         currentUser.uid,
         finalGroupId,
-        requirements.filter(req => req.trim()),
         {
-          points: 0, // Default points, rewards removed
-        },
-        0, // No penalty
-        challengeType === 'elimination' ? eliminationRule : undefined,
-        challengeType === 'deadline' ? startDate : undefined,
-        challengeType === 'deadline' ? endDate : undefined,
-        challengeType === 'progression' ? progressionDuration : undefined,
-        challengeType === 'progression' ? intervalType : undefined,
-        assessmentTime
+          requirements: requirements.filter(req => req.trim()),
+          eliminationRule: challengeType === 'elimination' ? eliminationRule : undefined,
+          strikesAllowed: challengeType === 'elimination' ? strikesAllowed : undefined,
+          startDate: challengeType === 'deadline' ? startDate : undefined,
+          endDate: challengeType === 'deadline' ? endDate : undefined,
+          progressionDuration: challengeType === 'progress' ? progressionDuration : undefined,
+          progressionIntervalType: challengeType === 'progress' ? intervalType : undefined,
+          assessmentTime,
+          cadence: {
+            unit: cadenceUnit,
+            ...(cadenceUnit === 'weekly' && { requiredCount: weeklyCount, weekStartsOn }),
+          },
+          submission: {
+            inputType,
+            ...(inputType === 'number' && { unitLabel, ...(minValue != null && { minValue }) }),
+            ...(inputType === 'timer' && minValue != null && { minValue }),
+            requireAttachment,
+          },
+        }
       );
 
       // Add participants for group challenges
@@ -296,11 +322,11 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
           const selectedGroup = userGroups.find(g => g.id === selectedGroupId);
           if (selectedGroup) membersToAdd = selectedGroup.memberIds;
         }
-        for (const memberId of membersToAdd) {
-          if (memberId !== currentUser.uid) {
-            await ChallengeService.addParticipant(challengeId, memberId);
-          }
-        }
+        await Promise.all(
+          membersToAdd
+            .filter(memberId => memberId !== currentUser.uid)
+            .map(memberId => ChallengeService.addParticipant(challengeId, memberId, finalGroupId))
+        );
       }
 
       // Navigate first, then show success (so user sees their new challenge on home)
@@ -311,11 +337,12 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
         [{ text: 'OK' }]
       );
     } catch (error) {
-      console.error('Error creating challenge:', error);
+      if (__DEV__) console.error('Error creating challenge:', error);
       Alert.alert('Error', 'Failed to create challenge. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
-
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -351,13 +378,13 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>
             Configure {challengeType.charAt(0).toUpperCase() + challengeType.slice(1)} Challenge
           </Text>
 
           {challengeType === 'elimination' && (
             <View>
-              <Text style={styles.configSubtitle}>
+              <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>
                 Define what happens when a user misses a requirement
               </Text>
               <Input
@@ -367,49 +394,68 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
                 multiline
                 variant="light"
               />
+              <View style={styles.strikesContainer}>
+                <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>Strikes before elimination</Text>
+                <View style={[styles.numberInputContainer, { backgroundColor: colors.surface }]}>
+                  <TouchableOpacity
+                    style={styles.numberButton}
+                    onPress={() => setStrikesAllowed(Math.max(0, strikesAllowed - 1))}
+                  >
+                    <Ionicons name="remove" size={20} color={Theme.colors.white} />
+                  </TouchableOpacity>
+                  <Text style={[styles.numberValue, { color: colors.text }]}>{strikesAllowed}</Text>
+                  <TouchableOpacity
+                    style={styles.numberButton}
+                    onPress={() => setStrikesAllowed(Math.min(5, strikesAllowed + 1))}
+                  >
+                    <Ionicons name="add" size={20} color={Theme.colors.white} />
+                  </TouchableOpacity>
+                </View>
+                <Text style={[styles.strikesHint, { color: colors.textSecondary }]}>0 = eliminated on first miss</Text>
+              </View>
             </View>
           )}
 
           {challengeType === 'deadline' && (
             <View>
-              <Text style={styles.configSubtitle}>
+              <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>
                 Set when the challenge starts and ends
               </Text>
               <View style={styles.dateRow}>
                 <View style={styles.dateInput}>
-                  <Text style={styles.dateLabel}>Start Date</Text>
-                  <TouchableOpacity 
-                    style={styles.dateButton} 
+                  <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>Start Date</Text>
+                  <TouchableOpacity
+                    style={[styles.dateButton, { backgroundColor: colors.card }]}
                     onPress={() => setShowStartDatePicker(true)}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.dateButtonText}>
-                      {startDate ? startDate.toLocaleDateString() : 'Select start date'}
+                    <Ionicons name="calendar-outline" size={18} color={colors.accent} />
+                    <Text style={[styles.dateButtonText, { color: startDate ? colors.text : colors.textSecondary }]}>
+                      {startDate ? startDate.toLocaleDateString() : 'Select'}
                     </Text>
-                    <Ionicons name="calendar" size={20} color={Theme.colors.textTertiary} />
                   </TouchableOpacity>
                 </View>
                 <View style={styles.dateInput}>
-                  <Text style={styles.dateLabel}>End Date</Text>
-                  <TouchableOpacity 
-                    style={styles.dateButton} 
+                  <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>End Date</Text>
+                  <TouchableOpacity
+                    style={[styles.dateButton, { backgroundColor: colors.card }]}
                     onPress={() => setShowEndDatePicker(true)}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.dateButtonText}>
-                      {endDate ? endDate.toLocaleDateString() : 'Select end date'}
+                    <Ionicons name="calendar-outline" size={18} color={colors.accent} />
+                    <Text style={[styles.dateButtonText, { color: endDate ? colors.text : colors.textSecondary }]}>
+                      {endDate ? endDate.toLocaleDateString() : 'Select'}
                     </Text>
-                    <Ionicons name="calendar" size={20} color={Theme.colors.textTertiary} />
                   </TouchableOpacity>
                 </View>
               </View>
             </View>
           )}
 
-          {challengeType === 'progression' && (
+          {challengeType === 'progress' && (
             <View>
               <View style={styles.progressionInput}>
-                <Text style={styles.configSubtitle}>
+                <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>
                   Choose the amount of time between each interval progression
                 </Text>
                 <View style={styles.numberInputContainer}>
@@ -429,7 +475,7 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
                 </View>
               </View>
               <View style={styles.progressionInput}>
-                <Text style={styles.configSubtitle}>
+                <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>
                   What needs to increase? Cardio done? Time spent coding?
                 </Text>
                 <Input
@@ -444,20 +490,163 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
           )}
 
           <View style={styles.assessmentTimeContainer}>
-            <Text style={styles.configSubtitle}>
-              Choose when the AI will assess what users posted (default: midnight)
+            <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>
+              Daily submission deadline
             </Text>
-            <TouchableOpacity style={styles.timeInputButton} onPress={() => setShowTimePicker(true)}>
-              <Text style={styles.timeInputButtonText}>
+            <TouchableOpacity style={[styles.timeInputButton, { backgroundColor: colors.card }]} onPress={() => setShowTimePicker(true)}>
+              <Ionicons name="time-outline" size={20} color={colors.accent} />
+              <Text style={[styles.timeInputButtonText, { color: colors.text }]}>
                 {assessmentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </Text>
-              <Ionicons name="time" size={20} color={Theme.colors.textTertiary} />
+              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
         </View>
 
+        {/* Cadence Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Requirements & Rules</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Cadence</Text>
+          <View style={[styles.modeToggleContainer, { backgroundColor: colors.surface }]}>
+            <TouchableOpacity
+              style={[styles.modeToggleButton, cadenceUnit === 'daily' && styles.modeToggleButtonActive]}
+              onPress={() => setCadenceUnit('daily')}
+            >
+              <Text style={[styles.modeToggleText, { color: colors.text }, cadenceUnit === 'daily' && styles.modeToggleTextActive]}>Daily</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modeToggleButton, cadenceUnit === 'weekly' && styles.modeToggleButtonActive]}
+              onPress={() => setCadenceUnit('weekly')}
+            >
+              <Text style={[styles.modeToggleText, { color: colors.text }, cadenceUnit === 'weekly' && styles.modeToggleTextActive]}>Weekly</Text>
+            </TouchableOpacity>
+          </View>
+          {cadenceUnit === 'weekly' && (
+            <View>
+              <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>Required check-ins per week</Text>
+              <View style={[styles.numberInputContainer, { backgroundColor: colors.surface }]}>
+                <TouchableOpacity
+                  style={styles.numberButton}
+                  onPress={() => setWeeklyCount(Math.max(1, weeklyCount - 1))}
+                >
+                  <Ionicons name="remove" size={20} color={Theme.colors.white} />
+                </TouchableOpacity>
+                <Text style={[styles.numberValue, { color: colors.text }]}>{weeklyCount}</Text>
+                <TouchableOpacity
+                  style={styles.numberButton}
+                  onPress={() => setWeeklyCount(Math.min(7, weeklyCount + 1))}
+                >
+                  <Ionicons name="add" size={20} color={Theme.colors.white} />
+                </TouchableOpacity>
+              </View>
+              <View style={styles.weekStartContainer}>
+                <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>Week starts on</Text>
+                <View style={[styles.modeToggleContainer, { backgroundColor: colors.surface }]}>
+                  <TouchableOpacity
+                    style={[styles.modeToggleButton, weekStartsOn === 0 && styles.modeToggleButtonActive]}
+                    onPress={() => setWeekStartsOn(0)}
+                  >
+                    <Text style={[styles.modeToggleText, { color: colors.text }, weekStartsOn === 0 && styles.modeToggleTextActive]}>Sunday</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modeToggleButton, weekStartsOn === 1 && styles.modeToggleButtonActive]}
+                    onPress={() => setWeekStartsOn(1)}
+                  >
+                    <Text style={[styles.modeToggleText, { color: colors.text }, weekStartsOn === 1 && styles.modeToggleTextActive]}>Monday</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+        </View>
+
+        {/* Submission Type Section */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Submission Type</Text>
+          <View style={styles.submissionGrid}>
+            {([
+              { key: 'boolean', label: 'Yes/No', icon: 'checkmark-circle-outline' },
+              { key: 'number', label: 'Number', icon: 'calculator-outline' },
+              { key: 'text', label: 'Text', icon: 'document-text-outline' },
+              { key: 'timer', label: 'Timer', icon: 'timer-outline' },
+            ] as const).map((item) => (
+              <TouchableOpacity
+                key={item.key}
+                style={[styles.submissionCard, { backgroundColor: colors.surface }, inputType === item.key && [styles.submissionCardActive, { backgroundColor: colors.card }]]}
+                onPress={() => setInputType(item.key)}
+              >
+                <Ionicons
+                  name={item.icon as any}
+                  size={24}
+                  color={inputType === item.key ? Theme.colors.secondary : colors.textSecondary}
+                />
+                <Text style={[styles.submissionCardLabel, { color: colors.textSecondary }, inputType === item.key && styles.submissionCardLabelActive]}>
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {inputType === 'number' && (
+            <View style={styles.submissionOptions}>
+              <Input
+                label="Unit Label"
+                placeholder="e.g. miles, reps, pages..."
+                value={unitLabel}
+                onChangeText={setUnitLabel}
+                variant="light"
+              />
+              <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>Minimum value</Text>
+              <View style={[styles.numberInputContainer, { backgroundColor: colors.surface }]}>
+                <TouchableOpacity
+                  style={styles.numberButton}
+                  onPress={() => setMinValue(Math.max(0, (minValue ?? 0) - 1))}
+                >
+                  <Ionicons name="remove" size={20} color={Theme.colors.white} />
+                </TouchableOpacity>
+                <Text style={[styles.numberValue, { color: colors.text }]}>{minValue ?? 0}</Text>
+                <TouchableOpacity
+                  style={styles.numberButton}
+                  onPress={() => setMinValue((minValue ?? 0) + 1)}
+                >
+                  <Ionicons name="add" size={20} color={Theme.colors.white} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+          {inputType === 'timer' && (
+            <View style={styles.submissionOptions}>
+              <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>Minimum minutes</Text>
+              <View style={[styles.numberInputContainer, { backgroundColor: colors.surface }]}>
+                <TouchableOpacity
+                  style={styles.numberButton}
+                  onPress={() => setMinValue(Math.max(0, (minValue ?? 0) - 5))}
+                >
+                  <Ionicons name="remove" size={20} color={Theme.colors.white} />
+                </TouchableOpacity>
+                <Text style={[styles.numberValue, { color: colors.text }]}>{minValue ?? 0} min</Text>
+                <TouchableOpacity
+                  style={styles.numberButton}
+                  onPress={() => setMinValue((minValue ?? 0) + 5)}
+                >
+                  <Ionicons name="add" size={20} color={Theme.colors.white} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+          <TouchableOpacity
+            style={styles.attachmentToggle}
+            onPress={() => setRequireAttachment(!requireAttachment)}
+          >
+            <Ionicons
+              name={requireAttachment ? 'checkbox' : 'square-outline'}
+              size={24}
+              color={requireAttachment ? Theme.colors.secondary : colors.textSecondary}
+            />
+            <Text style={[styles.attachmentToggleText, { color: colors.text }]}>Require photo proof</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Requirements & Rules</Text>
           {requirements.map((requirement, index) => (
             <View key={index} style={styles.requirementRow}>
               <Text style={styles.bulletPoint}>*</Text>
@@ -483,40 +672,40 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
 
         {!isSolo && !groupId && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Add Participants</Text>
-            <View style={styles.modeToggleContainer}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Add Participants</Text>
+            <View style={[styles.modeToggleContainer, { backgroundColor: colors.surface }]}>
               <TouchableOpacity
                 style={[styles.modeToggleButton, participantMode === 'friends' && styles.modeToggleButtonActive]}
                 onPress={() => setParticipantMode('friends')}
               >
-                <Ionicons name="person-add-outline" size={20} color={participantMode === 'friends' ? Theme.colors.white : Theme.colors.secondary} />
-                <Text style={[styles.modeToggleText, participantMode === 'friends' && styles.modeToggleTextActive]}>Invite Friends</Text>
+                <Ionicons name="person-add-outline" size={20} color={participantMode === 'friends' ? Theme.colors.white : colors.text} />
+                <Text style={[styles.modeToggleText, { color: colors.text }, participantMode === 'friends' && styles.modeToggleTextActive]}>Invite Friends</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modeToggleButton, participantMode === 'group' && styles.modeToggleButtonActive]}
                 onPress={() => setParticipantMode('group')}
               >
-                <Ionicons name="people-outline" size={20} color={participantMode === 'group' ? Theme.colors.white : Theme.colors.secondary} />
-                <Text style={[styles.modeToggleText, participantMode === 'group' && styles.modeToggleTextActive]}>Select Group</Text>
+                <Ionicons name="people-outline" size={20} color={participantMode === 'group' ? Theme.colors.white : colors.text} />
+                <Text style={[styles.modeToggleText, { color: colors.text }, participantMode === 'group' && styles.modeToggleTextActive]}>Select Group</Text>
               </TouchableOpacity>
             </View>
 
             {participantMode === 'friends' && (
               friends.length === 0 ? (
                 <View style={styles.noFriends}>
-                  <Ionicons name="people-outline" size={32} color={Theme.colors.gray400} />
-                  <Text style={styles.noFriendsText}>No friends yet</Text>
-                  <Text style={styles.noFriendsSubtext}>Add friends to invite them to challenges</Text>
+                  <Ionicons name="people-outline" size={32} color={colors.textSecondary} />
+                  <Text style={[styles.noFriendsText, { color: colors.textSecondary }]}>No friends yet</Text>
+                  <Text style={[styles.noFriendsSubtext, { color: colors.textSecondary }]}>Add friends to invite them to challenges</Text>
                 </View>
               ) : (
                 friends.map((friend) => (
                   <TouchableOpacity
                     key={friend.id}
-                    style={[styles.friendItem, friend.selected && styles.friendItemSelected]}
+                    style={[styles.friendItem, { backgroundColor: colors.surface }, friend.selected && [styles.friendItemSelected, { backgroundColor: colors.card }]]}
                     onPress={() => toggleFriendSelection(friend.id)}
                   >
                     <Avatar source={friend.photoURL} initials={friend.displayName.charAt(0)} size="md" />
-                    <Text style={styles.friendName}>{friend.displayName}</Text>
+                    <Text style={[styles.friendName, { color: colors.text }]}>{friend.displayName}</Text>
                     <View style={styles.selectionIndicator}>
                       {friend.selected ? (
                         <Ionicons name="checkmark-circle" size={24} color={Theme.colors.secondary} />
@@ -532,28 +721,28 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
             {participantMode === 'group' && (
               userGroups.length === 0 ? (
                 <View style={styles.noFriends}>
-                  <Ionicons name="people-outline" size={32} color={Theme.colors.gray400} />
-                  <Text style={styles.noFriendsText}>No groups yet</Text>
-                  <Text style={styles.noFriendsSubtext}>Create a group first to add it to a challenge</Text>
+                  <Ionicons name="people-outline" size={32} color={colors.textSecondary} />
+                  <Text style={[styles.noFriendsText, { color: colors.textSecondary }]}>No groups yet</Text>
+                  <Text style={[styles.noFriendsSubtext, { color: colors.textSecondary }]}>Create a group first to add it to a challenge</Text>
                 </View>
               ) : (
                 userGroups.map((group) => (
                   <TouchableOpacity
                     key={group.id}
-                    style={[styles.groupItem, selectedGroupId === group.id && styles.groupItemSelected]}
+                    style={[styles.groupItem, { backgroundColor: colors.surface }, selectedGroupId === group.id && [styles.groupItemSelected, { backgroundColor: colors.card }]]}
                     onPress={() => toggleGroupSelection(group.id)}
                   >
                     <View style={styles.groupItemContent}>
                       <Ionicons name="people" size={24} color={Theme.colors.secondary} />
                       <View style={styles.groupItemInfo}>
-                        <Text style={styles.groupItemName}>{group.name}</Text>
-                        <Text style={styles.groupItemDescription} numberOfLines={1}>
+                        <Text style={[styles.groupItemName, { color: colors.text }]}>{group.name}</Text>
+                        <Text style={[styles.groupItemDescription, { color: colors.textSecondary }]} numberOfLines={1}>
                           {(group as { description?: string }).description || ''}
                         </Text>
-                        <Text style={styles.groupItemMembers}>
+                        <Text style={[styles.groupItemMembers, { color: colors.textSecondary }]}>
                           {group.memberIds.length} member{group.memberIds.length !== 1 ? 's' : ''}
                         </Text>
-                        <Text style={styles.groupItemChallenges}>
+                        <Text style={[styles.groupItemChallenges, { color: colors.textSecondary }]}>
                           {(challengeCountByGroupId[group.id] ?? 0)} challenge
                           {(challengeCountByGroupId[group.id] ?? 0) === 1 ? '' : 's'}
                         </Text>
@@ -582,12 +771,12 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
         <>
           <Modal visible={showStartDatePicker} transparent animationType="slide" onRequestClose={() => setShowStartDatePicker(false)}>
             <View style={styles.pickerModalContainer}>
-              <View style={styles.pickerModalContent}>
-                <View style={styles.pickerModalHeader}>
+              <View style={[styles.pickerModalContent, { backgroundColor: colors.background }]}>
+                <View style={[styles.pickerModalHeader, { borderBottomColor: colors.dividerLineTodo }]}>
                   <TouchableOpacity onPress={() => setShowStartDatePicker(false)} style={styles.pickerModalButton}>
-                    <Text style={styles.pickerModalCancelText}>Cancel</Text>
+                    <Text style={[styles.pickerModalCancelText, { color: colors.textSecondary }]}>Cancel</Text>
                   </TouchableOpacity>
-                  <Text style={styles.pickerModalTitle}>Select Start Date</Text>
+                  <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Start Date</Text>
                   <TouchableOpacity
                     onPress={() => {
                       setStartDate(startDate || new Date());
@@ -603,7 +792,7 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
                   mode="date"
                   display="spinner"
                   onChange={(_, d) => d && setStartDate(d)}
-                  textColor="#000000"
+                  textColor={colors.text}
                   accentColor={Theme.colors.secondary}
                 />
               </View>
@@ -612,12 +801,12 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
 
           <Modal visible={showEndDatePicker} transparent animationType="slide" onRequestClose={() => setShowEndDatePicker(false)}>
             <View style={styles.pickerModalContainer}>
-              <View style={styles.pickerModalContent}>
-                <View style={styles.pickerModalHeader}>
+              <View style={[styles.pickerModalContent, { backgroundColor: colors.background }]}>
+                <View style={[styles.pickerModalHeader, { borderBottomColor: colors.dividerLineTodo }]}>
                   <TouchableOpacity onPress={() => setShowEndDatePicker(false)} style={styles.pickerModalButton}>
-                    <Text style={styles.pickerModalCancelText}>Cancel</Text>
+                    <Text style={[styles.pickerModalCancelText, { color: colors.textSecondary }]}>Cancel</Text>
                   </TouchableOpacity>
-                  <Text style={styles.pickerModalTitle}>Select End Date</Text>
+                  <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select End Date</Text>
                   <TouchableOpacity
                     onPress={() => {
                       const chosen = endDate || new Date();
@@ -644,7 +833,7 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
                     }
                     d && setEndDate(d);
                   }}
-                  textColor="#000000"
+                  textColor={colors.text}
                   accentColor={Theme.colors.secondary}
                 />
               </View>
@@ -653,12 +842,12 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
 
           <Modal visible={showTimePicker} transparent animationType="slide" onRequestClose={() => setShowTimePicker(false)}>
             <View style={styles.pickerModalContainer}>
-              <View style={styles.pickerModalContent}>
-                <View style={styles.pickerModalHeader}>
+              <View style={[styles.pickerModalContent, { backgroundColor: colors.background }]}>
+                <View style={[styles.pickerModalHeader, { borderBottomColor: colors.dividerLineTodo }]}>
                   <TouchableOpacity onPress={() => setShowTimePicker(false)} style={styles.pickerModalButton}>
-                    <Text style={styles.pickerModalCancelText}>Cancel</Text>
+                    <Text style={[styles.pickerModalCancelText, { color: colors.textSecondary }]}>Cancel</Text>
                   </TouchableOpacity>
-                  <Text style={styles.pickerModalTitle}>Select Time</Text>
+                  <Text style={[styles.pickerModalTitle, { color: colors.text }]}>Select Time</Text>
                   <TouchableOpacity onPress={() => setShowTimePicker(false)} style={styles.pickerModalButton}>
                     <Text style={styles.pickerModalDoneText}>Done</Text>
                   </TouchableOpacity>
@@ -668,7 +857,7 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
                   mode="time"
                   display="spinner"
                   onChange={(_, t) => t && setAssessmentTime(t)}
-                  textColor="#000000"
+                  textColor={colors.text}
                   accentColor={Theme.colors.secondary}
                 />
               </View>
@@ -787,16 +976,16 @@ const styles = StyleSheet.create({
   },
   dateButton: {
     backgroundColor: '#F5F5F5',
-    borderRadius: Theme.borderRadius.md,
+    borderRadius: Theme.borderRadius.lg,
     padding: Theme.spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 8,
     minHeight: 50,
   },
   dateButtonText: {
     ...Theme.typography.body,
-    color: '#000000',
+    flex: 1,
   },
   progressionInput: {
     marginBottom: Theme.spacing.md,
@@ -806,12 +995,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#F5F5F5',
-    borderRadius: Theme.borderRadius.md,
+    borderRadius: Theme.borderRadius.lg,
     padding: Theme.spacing.sm,
   },
   numberButton: {
     backgroundColor: Theme.colors.secondary,
-    borderRadius: Theme.borderRadius.md,
+    borderRadius: 20,
     width: 40,
     height: 40,
     alignItems: 'center',
@@ -820,7 +1009,8 @@ const styles = StyleSheet.create({
   numberValue: {
     ...Theme.typography.body,
     color: '#000000',
-    fontWeight: '600',
+    fontWeight: '700',
+    fontSize: 18,
     minWidth: 80,
     textAlign: 'center',
   },
@@ -829,16 +1019,17 @@ const styles = StyleSheet.create({
   },
   timeInputButton: {
     backgroundColor: '#F5F5F5',
-    borderRadius: Theme.borderRadius.md,
+    borderRadius: Theme.borderRadius.lg,
     padding: Theme.spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 10,
     minHeight: 50,
   },
   timeInputButtonText: {
     ...Theme.typography.body,
-    color: '#000000',
+    flex: 1,
+    fontWeight: '600',
   },
   requirementRow: {
     flexDirection: 'row',
@@ -882,19 +1073,19 @@ const styles = StyleSheet.create({
   modeToggleContainer: {
     flexDirection: 'row',
     marginBottom: Theme.spacing.md,
-    backgroundColor: '#F5F5F5',
-    borderRadius: Theme.borderRadius.md,
-    padding: Theme.spacing.xs,
-    gap: Theme.spacing.xs,
+    backgroundColor: '#F0F0F0',
+    borderRadius: Theme.borderRadius.lg,
+    padding: 4,
+    gap: 4,
   },
   modeToggleButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: Theme.spacing.sm,
+    paddingVertical: 10,
     paddingHorizontal: Theme.spacing.md,
-    borderRadius: Theme.borderRadius.sm,
+    borderRadius: Theme.borderRadius.md,
     backgroundColor: 'transparent',
     gap: Theme.spacing.xs,
   },
@@ -1034,5 +1225,60 @@ const styles = StyleSheet.create({
     ...Theme.typography.h4,
     color: '#000000',
     fontWeight: '600',
+  },
+  strikesContainer: {
+    marginTop: Theme.spacing.md,
+  },
+  strikesHint: {
+    ...Theme.typography.caption,
+    color: '#999999',
+    textAlign: 'center',
+    marginTop: Theme.spacing.xs,
+  },
+  weekStartContainer: {
+    marginTop: Theme.spacing.md,
+  },
+  submissionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Theme.spacing.sm,
+    marginBottom: Theme.spacing.md,
+  },
+  submissionCard: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: '#F5F5F5',
+    borderRadius: Theme.borderRadius.lg,
+    paddingVertical: 16,
+    paddingHorizontal: Theme.spacing.md,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+    gap: 6,
+  },
+  submissionCardActive: {
+    borderColor: Theme.colors.secondary,
+    backgroundColor: '#FFF5F0',
+  },
+  submissionCardLabel: {
+    ...Theme.typography.bodySmall,
+    color: '#666666',
+    fontWeight: '600',
+  },
+  submissionCardLabelActive: {
+    color: Theme.colors.secondary,
+  },
+  submissionOptions: {
+    marginBottom: Theme.spacing.md,
+  },
+  attachmentToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Theme.spacing.sm,
+    gap: Theme.spacing.sm,
+  },
+  attachmentToggleText: {
+    ...Theme.typography.body,
+    color: '#333333',
   },
 });

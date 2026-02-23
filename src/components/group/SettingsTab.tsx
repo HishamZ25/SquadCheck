@@ -3,22 +3,38 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'rea
 import { Avatar } from '../common/Avatar';
 import { User, Challenge } from '../../types';
 import { Ionicons } from '@expo/vector-icons';
+import { useColorMode } from '../../theme/ColorModeContext';
 
 interface SettingsTabProps {
   description: string | null;
   members: User[];
   challenges: Challenge[];
+  groupMembers?: User[];
   onChallengePress: (challenge: Challenge) => void;
   onInvitePress?: () => void;
+  onLeaveGroup?: () => void;
 }
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
   description,
   members,
   challenges,
+  groupMembers,
   onChallengePress,
   onInvitePress,
+  onLeaveGroup,
 }) => {
+  const { colors } = useColorMode();
+  const activeChallenges = challenges.filter(c => c.state !== 'ended');
+  const finishedChallenges = challenges.filter(c => c.state === 'ended');
+
+  const getWinnerName = (winnerId?: string) => {
+    if (!winnerId) return null;
+    const allMembers = groupMembers || members;
+    const winner = allMembers.find(m => m.id === winnerId);
+    return winner?.displayName || null;
+  };
+
   return (
     <ScrollView
       style={styles.container}
@@ -26,16 +42,16 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
       showsVerticalScrollIndicator={false}
     >
       {/* About Section */}
-      <View style={styles.card}>
-        <Text style={styles.cardLabel}>About</Text>
-        <Text style={styles.descriptionText}>{description || 'No description'}</Text>
+      <View style={[styles.card, { backgroundColor: colors.surface }]}>
+        <Text style={[styles.cardLabel, { color: colors.text }]}>About</Text>
+        <Text style={[styles.descriptionText, { color: colors.text }]}>{description || 'No description'}</Text>
       </View>
 
       {/* Members Section */}
-      <View style={styles.card}>
+      <View style={[styles.card, { backgroundColor: colors.surface }]}>
         <View style={styles.cardHeader}>
-          <Text style={styles.cardLabel}>Members</Text>
-          <Text style={styles.cardCount}>{members.length}</Text>
+          <Text style={[styles.cardLabel, { color: colors.text }]}>Members</Text>
+          <Text style={[styles.cardCount, { color: colors.textSecondary }]}>{members.length}</Text>
         </View>
         <View style={styles.membersList}>
           {members.map((member) => (
@@ -45,69 +61,124 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 initials={member.displayName.charAt(0)}
                 size="sm"
               />
-              <Text style={styles.memberName}>{member.displayName}</Text>
+              <Text style={[styles.memberName, { color: colors.text }]}>{member.displayName}</Text>
             </View>
           ))}
         </View>
         {onInvitePress && (
-          <TouchableOpacity style={styles.inviteButton} onPress={onInvitePress}>
-            <Ionicons name="person-add" size={20} color="#FF6B35" />
-            <Text style={styles.inviteButtonText}>Invite to squad</Text>
+          <TouchableOpacity style={[styles.inviteButton, { backgroundColor: colors.card, borderColor: colors.accent }]} onPress={onInvitePress}>
+            <Ionicons name="person-add" size={20} color={colors.accent} />
+            <Text style={[styles.inviteButtonText, { color: colors.accent }]}>Invite to squad</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Challenges Section */}
-      <View style={styles.card}>
+      {/* Active Challenges Section */}
+      <View style={[styles.card, { backgroundColor: colors.surface }]}>
         <View style={styles.cardHeader}>
-          <Text style={styles.cardLabel}>Challenges</Text>
-          <Text style={styles.cardCount}>{challenges.length}</Text>
+          <Text style={[styles.cardLabel, { color: colors.text }]}>Active Challenges</Text>
+          <Text style={[styles.cardCount, { color: colors.textSecondary }]}>{activeChallenges.length}</Text>
         </View>
-        {challenges.length === 0 ? (
-          <Text style={styles.emptyText}>No challenges yet</Text>
+        {activeChallenges.length === 0 ? (
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>No active challenges</Text>
         ) : (
           <View style={styles.challengesList}>
-            {challenges.map((challenge) => (
+            {activeChallenges.map((challenge) => (
               <TouchableOpacity
                 key={challenge.id}
-                style={styles.challengeRow}
+                style={[styles.challengeRow, { backgroundColor: colors.card }]}
                 onPress={() => onChallengePress(challenge)}
               >
-                <View style={styles.challengeIcon}>
+                <View style={[styles.challengeIcon, { backgroundColor: colors.accent + '20' }]}>
                   <Ionicons
                     name={challenge.type === 'elimination' ? 'skull' : 'trophy'}
                     size={18}
-                    color="#FF6B35"
+                    color={colors.accent}
                   />
                 </View>
                 <View style={styles.challengeInfo}>
-                  <Text style={styles.challengeName}>{challenge.title}</Text>
-                  <Text style={styles.challengeType}>
+                  <Text style={[styles.challengeName, { color: colors.text }]}>{challenge.title}</Text>
+                  <Text style={[styles.challengeType, { color: colors.textSecondary }]}>
                     {challenge.cadence?.unit === 'daily'
                       ? 'Daily'
                       : `${challenge.cadence?.requiredCount || 1}x/week`}
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color="#999" />
+                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
               </TouchableOpacity>
             ))}
           </View>
         )}
       </View>
 
+      {/* Finished Challenges Section */}
+      {finishedChallenges.length > 0 && (
+        <View style={[styles.card, { backgroundColor: colors.surface }]}>
+          <View style={styles.cardHeader}>
+            <Text style={[styles.cardLabel, { color: colors.text }]}>Finished</Text>
+            <Text style={[styles.cardCount, { color: colors.textSecondary }]}>{finishedChallenges.length}</Text>
+          </View>
+          <View style={styles.challengesList}>
+            {finishedChallenges.map((challenge) => {
+              const winnerName = getWinnerName(challenge.winnerId);
+              return (
+                <TouchableOpacity
+                  key={challenge.id}
+                  style={[styles.challengeRow, styles.finishedRow, { backgroundColor: colors.card }]}
+                  onPress={() => onChallengePress(challenge)}
+                >
+                  <View style={[styles.challengeIcon, { backgroundColor: colors.textSecondary + '20' }]}>
+                    <Ionicons
+                      name={challenge.type === 'elimination' ? 'skull' : 'trophy'}
+                      size={18}
+                      color={colors.textSecondary}
+                    />
+                  </View>
+                  <View style={styles.challengeInfo}>
+                    <Text style={[styles.challengeName, { color: colors.textSecondary }]}>{challenge.title}</Text>
+                    {winnerName ? (
+                      <View style={styles.winnerBadge}>
+                        <Ionicons name="medal" size={12} color="#F5A623" />
+                        <Text style={styles.winnerText}>{winnerName}</Text>
+                      </View>
+                    ) : (
+                      <Text style={[styles.challengeType, { color: colors.textSecondary }]}>Ended</Text>
+                    )}
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      )}
+
       {/* Stats Grid */}
       <View style={styles.statsGrid}>
-        <View style={styles.statCard}>
-          <Ionicons name="people" size={24} color="#FF6B35" />
-          <Text style={styles.statNumber}>{members.length}</Text>
-          <Text style={styles.statLabel}>Members</Text>
+        <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
+          <Ionicons name="people" size={24} color={colors.accent} />
+          <Text style={[styles.statNumber, { color: colors.text }]}>{members.length}</Text>
+          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Members</Text>
         </View>
-        <View style={styles.statCard}>
-          <Ionicons name="trophy" size={24} color="#FF6B35" />
-          <Text style={styles.statNumber}>{challenges.length}</Text>
-          <Text style={styles.statLabel}>Challenges</Text>
+        <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
+          <Ionicons name="flame" size={24} color={colors.accent} />
+          <Text style={[styles.statNumber, { color: colors.text }]}>{activeChallenges.length}</Text>
+          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Active</Text>
+        </View>
+        <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
+          <Ionicons name="checkmark-circle" size={24} color={colors.textSecondary} />
+          <Text style={[styles.statNumber, { color: colors.text }]}>{finishedChallenges.length}</Text>
+          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Finished</Text>
         </View>
       </View>
+
+      {/* Leave Group */}
+      {onLeaveGroup && (
+        <TouchableOpacity style={[styles.leaveButton, { backgroundColor: colors.surface }]} onPress={onLeaveGroup}>
+          <Ionicons name="exit-outline" size={20} color="#F44336" />
+          <Text style={styles.leaveButtonText}>Leave Group</Text>
+        </TouchableOpacity>
+      )}
     </ScrollView>
   );
 };
@@ -120,7 +191,6 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   card: {
-    backgroundColor: '#FFF',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
@@ -139,17 +209,14 @@ const styles = StyleSheet.create({
   cardLabel: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#333',
     marginBottom: 8,
   },
   cardCount: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666',
   },
   descriptionText: {
     fontSize: 14,
-    color: '#333',
     lineHeight: 20,
   },
   membersList: {
@@ -162,7 +229,6 @@ const styles = StyleSheet.create({
   },
   memberName: {
     fontSize: 15,
-    color: '#333',
     fontWeight: '500',
   },
   inviteButton: {
@@ -173,15 +239,12 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingVertical: 12,
     borderRadius: 10,
-    backgroundColor: '#FFF5F0',
     borderWidth: 1,
-    borderColor: '#FF6B35',
     borderStyle: 'dashed',
   },
   inviteButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#FF6B35',
   },
   challengesList: {
     gap: 8,
@@ -190,7 +253,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
-    backgroundColor: '#FAFAFA',
     borderRadius: 8,
     gap: 12,
   },
@@ -198,7 +260,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#FFF5F0',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -208,16 +269,26 @@ const styles = StyleSheet.create({
   challengeName: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#333',
     marginBottom: 2,
   },
   challengeType: {
     fontSize: 13,
-    color: '#666',
+  },
+  finishedRow: {
+    opacity: 0.6,
+  },
+  winnerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  winnerText: {
+    fontSize: 13,
+    color: '#F5A623',
+    fontWeight: '600',
   },
   emptyText: {
     fontSize: 14,
-    color: '#666',
     textAlign: 'center',
     paddingVertical: 20,
   },
@@ -227,7 +298,6 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#FFF',
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -240,12 +310,26 @@ const styles = StyleSheet.create({
   statNumber: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#333',
     marginTop: 8,
   },
   statLabel: {
     fontSize: 12,
-    color: '#666',
     marginTop: 4,
+  },
+  leaveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F44336',
+  },
+  leaveButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#F44336',
   },
 });

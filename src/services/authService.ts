@@ -1,12 +1,14 @@
-import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  signOut, 
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
   updateProfile,
+  deleteUser,
   sendEmailVerification as firebaseSendEmailVerification,
-  User as FirebaseUser 
+  sendPasswordResetEmail as firebaseSendPasswordResetEmail,
+  User as FirebaseUser,
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { User } from '../types';
 import { DicebearService } from './dicebearService';
@@ -31,6 +33,11 @@ export class AuthService {
         badges: [],
         unlockedTitles: [],
         unlockedProfileIcons: [],
+        xp: 0,
+        level: 1,
+        levelTitle: 'Rookie',
+        totalCheckIns: 0,
+        longestStreak: 0,
         createdAt: new Date(),
         lastActive: new Date(),
       };
@@ -38,7 +45,7 @@ export class AuthService {
       await setDoc(doc(db, 'users', user.uid), userData);
       return userData;
     } catch (error) {
-      console.error('Error signing up:', error);
+      if (__DEV__) console.error('Error signing up:', error);
       throw error;
     }
   }
@@ -49,7 +56,7 @@ export class AuthService {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       return userCredential.user;
     } catch (error) {
-      console.error('Error signing in:', error);
+      if (__DEV__) console.error('Error signing in:', error);
       throw error;
     }
   }
@@ -57,11 +64,9 @@ export class AuthService {
   // Sign out
   static async signOut(): Promise<void> {
     try {
-      console.log('Calling Firebase signOut...');
       await signOut(auth);
-      console.log('Firebase signOut completed successfully');
     } catch (error) {
-      console.error('Error signing out:', error);
+      if (__DEV__) console.error('Error signing out:', error);
       throw error;
     }
   }
@@ -71,7 +76,6 @@ export class AuthService {
     try {
       const user = auth.currentUser;
       if (!user) {
-        console.log('No authenticated user found');
         return null;
       }
 
@@ -82,7 +86,6 @@ export class AuthService {
       } catch (error: any) {
         // If permissions error, try to create the document
         if (error?.code === 'permission-denied' || error?.message?.includes('permission')) {
-          console.log('Permission denied accessing user document, attempting to create...');
           // Fall through to create user document
         } else {
           throw error;
@@ -106,13 +109,13 @@ export class AuthService {
         }
         return userData;
       }
-      
+
       // If no Firestore document exists, create one from Firebase Auth user
       // Use displayName if available, otherwise use email username or a default
-      const displayName = user.displayName || 
+      const displayName = user.displayName ||
                          (user.email ? user.email.split('@')[0] : 'User') ||
                          'User';
-      
+
       const userData: User = {
         id: user.uid,
         email: user.email || '',
@@ -122,28 +125,32 @@ export class AuthService {
         badges: [],
         unlockedTitles: [],
         unlockedProfileIcons: [],
+        xp: 0,
+        level: 1,
+        levelTitle: 'Rookie',
+        totalCheckIns: 0,
+        longestStreak: 0,
         createdAt: new Date(),
         lastActive: new Date(),
       };
-      
+
       // Save to Firestore for future use
       try {
         await setDoc(doc(db, 'users', user.uid), userData);
-        console.log('Created user document in Firestore:', user.uid);
       } catch (error: any) {
         // If we can't write to Firestore, still return the user data
         // This allows the app to work even if Firestore rules are strict
-        console.warn('Could not create user document in Firestore:', error?.message);
+        if (__DEV__) console.warn('Could not create user document in Firestore:', error?.message);
         // Return the user data anyway so the app can function
       }
-      
+
       return userData;
     } catch (error: any) {
-      console.error('Error getting current user:', error);
+      if (__DEV__) console.error('Error getting current user:', error);
       // If there's a permissions error, try to return basic user info from auth
       const user = auth.currentUser;
       if (user) {
-        const displayName = user.displayName || 
+        const displayName = user.displayName ||
                            (user.email ? user.email.split('@')[0] : 'User') ||
                            'User';
         return {
@@ -155,6 +162,11 @@ export class AuthService {
           badges: [],
           unlockedTitles: [],
           unlockedProfileIcons: [],
+          xp: 0,
+          level: 1,
+          levelTitle: 'Rookie',
+          totalCheckIns: 0,
+          longestStreak: 0,
           createdAt: new Date(),
           lastActive: new Date(),
         };
@@ -174,7 +186,7 @@ export class AuthService {
         lastActive: new Date(),
       });
     } catch (error) {
-      console.error('Error updating profile:', error);
+      if (__DEV__) console.error('Error updating profile:', error);
       throw error;
     }
   }
@@ -189,7 +201,7 @@ export class AuthService {
         lastActive: new Date(),
       });
     } catch (error) {
-      console.error('Error updating last active:', error);
+      if (__DEV__) console.error('Error updating last active:', error);
     }
   }
 
@@ -199,13 +211,11 @@ export class AuthService {
       const user = auth.currentUser;
       if (!user) throw new Error('No user logged in');
       if (user.emailVerified) {
-        console.log('Email already verified');
         return;
       }
       await firebaseSendEmailVerification(user);
-      console.log('Verification email sent to:', user.email);
     } catch (error) {
-      console.error('Error sending verification email:', error);
+      if (__DEV__) console.error('Error sending verification email:', error);
       throw error;
     }
   }
@@ -218,8 +228,39 @@ export class AuthService {
       await user.reload();
       return user.emailVerified;
     } catch (error) {
-      console.error('Error checking email verification:', error);
+      if (__DEV__) console.error('Error checking email verification:', error);
       throw error;
     }
   }
-} 
+
+  // Send password reset email (like sign up flow: user receives email with link)
+  static async sendPasswordResetEmail(email: string): Promise<void> {
+    try {
+      await firebaseSendPasswordResetEmail(auth, email);
+    } catch (error) {
+      if (__DEV__) console.error('Error sending password reset email:', error);
+      throw error;
+    }
+  }
+
+  // Delete user account and Firestore document
+  static async deleteAccount(): Promise<void> {
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error('No user logged in');
+
+      // Delete Firestore user document first
+      try {
+        await deleteDoc(doc(db, 'users', user.uid));
+      } catch (e) {
+        if (__DEV__) console.warn('Could not delete user doc:', e);
+      }
+
+      // Delete Firebase Auth account
+      await deleteUser(user);
+    } catch (error) {
+      if (__DEV__) console.error('Error deleting account:', error);
+      throw error;
+    }
+  }
+}

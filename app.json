@@ -25,7 +25,14 @@
     "plugins": [
       "expo-image-picker",
       "expo-camera",
-      "expo-media-library"
+      "expo-media-library",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#FF6B35"
+        }
+      ]
     ],
     "permissions": [
       "CAMERA",

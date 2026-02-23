@@ -46,8 +46,6 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({
     })();
   }, []);
 
-
-
   const handleTakePhoto = async () => {
     if (hasPermission === null) {
       Alert.alert('Camera Permission', 'Requesting camera permission...');
@@ -75,7 +73,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({
         Alert.alert('Error', 'Camera not ready. Please try again.');
       }
     } catch (error) {
-      console.error('Error taking photo:', error);
+      if (__DEV__) console.error('Error taking photo:', error);
       Alert.alert('Error', 'Failed to take photo. Please try again.');
     }
   };
@@ -93,7 +91,7 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({
         setImageUri(result.assets[0].uri);
       }
     } catch (error) {
-      console.error('Error picking image:', error);
+      if (__DEV__) console.error('Error picking image:', error);
       Alert.alert('Error', 'Failed to pick image from gallery');
     }
   };
@@ -150,8 +148,6 @@ export const CheckInModal: React.FC<CheckInModalProps> = ({
                 <Image 
                   source={{ uri: imageUri }} 
                   style={styles.image}
-                  onError={(error) => console.log('Image error:', error)}
-                  onLoad={() => console.log('Image loaded successfully')}
                 />
                 <TouchableOpacity 
                   style={styles.removeImageButton}

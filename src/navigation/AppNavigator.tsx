@@ -22,19 +22,25 @@ import { CalendarScreen } from '../screens/main/CalendarScreen';
 import { GroupChatScreen } from '../screens/main/GroupChatScreen';
 import { SocialScreen } from '../screens/main/SocialScreen';
 import { SettingsScreen } from '../screens/main/SettingsScreen';
+import { ProfileScreen } from '../screens/main/ProfileScreen';
+import { NotificationsScreen } from '../screens/main/NotificationsScreen';
+import { PrivacyScreen } from '../screens/main/PrivacyScreen';
+import { HelpSupportScreen } from '../screens/main/HelpSupportScreen';
 import { CreateSimpleGroupScreen } from '../screens/main/CreateSimpleGroupScreen';
 import { CreateChallengeScreen } from '../screens/main/CreateChallengeScreen';
 import { GroupTypeScreen } from '../screens/main/GroupTypeScreen';
 import { SelectGroupScreen } from '../screens/main/SelectGroupScreen';
 import { StoreScreen } from '../screens/main/StoreScreen';
 import { CreateReminderScreen } from '../screens/main/CreateReminderScreen';
-import { CreateSoloChallengeScreen } from '../screens/main/CreateSoloChallengeScreen';
 import { InviteToGroupScreen } from '../screens/main/InviteToGroupScreen';
 import { FriendProfileScreen } from '../screens/main/FriendProfileScreen';
+import { AchievementsScreen } from '../screens/main/AchievementsScreen';
+import { LevelsScreen } from '../screens/main/LevelsScreen';
 
 // Challenge Screens
 import { ChallengeDetailScreen } from '../screens/challenge/ChallengeDetailScreen';
 import { CheckInScreen } from '../screens/challenge/CheckInScreen';
+import { ChallengeGalleryScreen } from '../screens/challenge/ChallengeGalleryScreen';
 
 export type RootStackParamList = {
   Main: undefined;
@@ -43,18 +49,24 @@ export type RootStackParamList = {
   EmailConfirmation: { email?: string };
   Onboarding: { fromSettings?: boolean };
   Settings: { user?: any };
+  Profile: { user?: any };
+  Notifications: undefined;
+  Privacy: undefined;
+  HelpSupport: undefined;
   SelectGroup: undefined;
   GroupType: { isSolo?: boolean; groupId?: string };
   CreateSimpleGroup: undefined;
   CreateChallenge: { challengeType?: string; isSolo?: boolean; groupId?: string };
-  CreateSoloChallenge: { challengeType?: string };
   CreateReminder: undefined;
   GroupChat: { groupId: string };
   InviteToGroup: { groupId: string; groupName?: string };
   Store: undefined;
   FriendProfile: { user: any; currentUser?: any };
+  Achievements: undefined;
+  Levels: undefined;
   ChallengeDetail: { challengeId: string };
   CheckIn: { challengeId: string; details?: any };
+  ChallengeGallery: { challengeId: string; memberIds: string[]; memberProfiles: Record<string, { name: string; avatarUri?: string }> };
 };
 
 // Create navigators
@@ -164,7 +176,6 @@ const RootNavigator = () => {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      console.log('Auth state changed:', user ? `User: ${user.email}` : 'No user');
       setUser(user);
       
       if (user) {
@@ -218,6 +229,10 @@ const RootNavigator = () => {
           <Stack.Screen name="Onboarding" component={OnboardingScreen as React.ComponentType<any>} />
           <Stack.Screen name="Main" component={MainTabNavigator} />
           <Stack.Screen name="Settings" component={SettingsScreen} />
+          <Stack.Screen name="Profile" component={ProfileScreen} />
+          <Stack.Screen name="Notifications" component={NotificationsScreen} />
+          <Stack.Screen name="Privacy" component={PrivacyScreen} />
+          <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
           <Stack.Screen name="SelectGroup" component={SelectGroupScreen} />
           <Stack.Screen name="GroupType" component={GroupTypeScreen} />
           <Stack.Screen name="CreateSimpleGroup" component={CreateSimpleGroupScreen} />
@@ -226,10 +241,12 @@ const RootNavigator = () => {
           <Stack.Screen name="InviteToGroup" component={InviteToGroupScreen as React.ComponentType<any>} />
           <Stack.Screen name="Store" component={StoreScreen} />
           <Stack.Screen name="FriendProfile" component={FriendProfileScreen as React.ComponentType<any>} />
+          <Stack.Screen name="Achievements" component={AchievementsScreen} />
+          <Stack.Screen name="Levels" component={LevelsScreen} />
           <Stack.Screen name="CreateReminder" component={CreateReminderScreen} />
-          <Stack.Screen name="CreateSoloChallenge" component={CreateSoloChallengeScreen as React.ComponentType<any>} />
           <Stack.Screen name="ChallengeDetail" component={ChallengeDetailScreen} />
           <Stack.Screen name="CheckIn" component={CheckInScreen as React.ComponentType<any>} />
+          <Stack.Screen name="ChallengeGallery" component={ChallengeGalleryScreen} />
         </>
       ) : (
         // Unauthenticated screens

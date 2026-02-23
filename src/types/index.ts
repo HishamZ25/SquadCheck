@@ -8,8 +8,41 @@ export interface User {
   unlockedTitles: UnlockedTitle[];
   unlockedProfileIcons: UnlockedProfileIcon[];
   selectedProfileIcon?: string;
+  pushToken?: string;
+  notificationPreferences?: NotificationPreferences;
+  // Gamification
+  xp: number;
+  level: number;
+  levelTitle: string;
+  totalCheckIns: number;
+  longestStreak: number;
+  onTimeCheckIns: number;
+  lateNightCheckIns: number;
+
   createdAt: Date;
   lastActive: Date;
+}
+
+export interface NotificationPreferences {
+  hour_before: boolean;
+  chat_all: boolean;
+  group_checkins: boolean;
+  elimination: boolean;
+  invites: boolean;
+  reminders: boolean;
+}
+
+export type NotificationType = keyof NotificationPreferences;
+
+export interface AppNotification {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  data?: Record<string, string>;
+  read: boolean;
+  createdAt: Date;
 }
 
 export interface Badge {
@@ -180,6 +213,13 @@ export interface ChallengeMember {
   strikes: number;
   eliminatedAt?: Date;
   lastEvaluatedPeriodKey?: string;
+
+  // Gamification — streaks
+  currentStreak: number;
+  longestStreak: number;
+  streakShields: number;
+  streakShieldUsed: boolean;
+  lastCheckInPeriodKey?: string;
 
   joinedAt: Date;
 }

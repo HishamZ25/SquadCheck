@@ -10,10 +10,8 @@ import {
   TouchableOpacity,
   ScrollView,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
-import { Theme } from '../../constants/theme';
 import { AuthService } from '../../services/authService';
 
 interface LoginScreenProps {

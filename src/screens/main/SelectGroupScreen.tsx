@@ -17,9 +17,8 @@ import { auth } from '../../services/firebase';
 import { CircleLoader } from '../../components/common/CircleLoader';
 import { Group, User } from '../../types';
 import { GroupCard } from '../../components/group';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../../services/firebase';
 import { useColorMode } from '../../theme/ColorModeContext';
+import { userCache } from '../../services/userCache';
 
 export const SelectGroupScreen: React.FC = () => {
   const navigation = useNavigation();
@@ -35,21 +34,17 @@ export const SelectGroupScreen: React.FC = () => {
   }, []);
 
   const loadGroupMembers = async (groupList: Group[]) => {
+    // Collect all unique member IDs and batch-fetch via cache
+    const allIds = new Set<string>();
+    groupList.forEach(g => (g.memberIds || []).forEach(id => allIds.add(id)));
+    const lookup = await userCache.getUsers(Array.from(allIds));
+
     const membersMap: Record<string, User[]> = {};
-    await Promise.all(
-      groupList.map(async (g) => {
-        const members: User[] = [];
-        for (const uid of g.memberIds || []) {
-          try {
-            const snap = await getDoc(doc(db, 'users', uid));
-            if (snap.exists()) members.push({ id: uid, ...snap.data() } as User);
-          } catch {
-            members.push({ id: uid, displayName: 'Unknown', email: '' } as User);
-          }
-        }
-        membersMap[g.id] = members;
-      })
-    );
+    groupList.forEach(g => {
+      membersMap[g.id] = (g.memberIds || [])
+        .map(uid => lookup.get(uid) || ({ id: uid, displayName: 'Unknown', email: '' } as User))
+        .filter(Boolean);
+    });
     setGroupMembers((prev) => ({ ...prev, ...membersMap }));
   };
 
@@ -75,10 +70,13 @@ export const SelectGroupScreen: React.FC = () => {
 
       const userGroups = await GroupService.getUserGroups(currentUser.uid);
       setGroups(userGroups);
-      await loadGroupMembers(userGroups);
-      await loadChallengeCounts(userGroups);
+      // Load members and challenge counts in parallel
+      await Promise.all([
+        loadGroupMembers(userGroups),
+        loadChallengeCounts(userGroups),
+      ]);
     } catch (error) {
-      console.error('Error loading groups:', error);
+      if (__DEV__) console.error('Error loading groups:', error);
       Alert.alert('Error', 'Failed to load your groups');
     } finally {
       setLoading(false);
@@ -104,9 +102,9 @@ export const SelectGroupScreen: React.FC = () => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.loadingContainer}>
-          <CircleLoader size="large" />
+          <CircleLoader dotColor={colors.accent} size="large" />
         </View>
       </SafeAreaView>
     );
@@ -136,21 +134,29 @@ export const SelectGroupScreen: React.FC = () => {
           </View>
         ) : (
           <View style={styles.groupsContainer}>
-            {groups.map((group) => (
-              <TouchableOpacity
-                key={group.id}
-                activeOpacity={0.9}
-                onPress={() => handleGroupSelect(group.id)}
-                style={[selectedGroup === group.id && { borderColor: colors.accent }, selectedGroup === group.id ? styles.selectedGroupWrapper : undefined]}
-              >
-                <GroupCard
-                  group={group}
-                  members={groupMembers[group.id] || []}
-                  challengeCount={challengeCountByGroupId[group.id] ?? 0}
-                  onPress={() => handleGroupSelect(group.id)}
-                />
-              </TouchableOpacity>
-            ))}
+            {groups.map((group) => {
+              const isSelected = selectedGroup === group.id;
+              return (
+                <View key={group.id} style={styles.groupCardWrapper}>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    onPress={() => handleGroupSelect(group.id)}
+                  >
+                    <GroupCard
+                      group={group}
+                      members={groupMembers[group.id] || []}
+                      challengeCount={challengeCountByGroupId[group.id] ?? 0}
+                      onPress={() => handleGroupSelect(group.id)}
+                    />
+                  </TouchableOpacity>
+                  {isSelected && (
+                    <View style={[styles.selectedBadge, { backgroundColor: colors.accent }]}>
+                      <Ionicons name="checkmark" size={16} color="#FFF" />
+                    </View>
+                  )}
+                </View>
+              );
+            })}
           </View>
         )}
       </ScrollView>
@@ -229,9 +235,23 @@ const styles = StyleSheet.create({
   groupsContainer: {
     marginBottom: Theme.spacing.xl,
   },
-  selectedGroupWrapper: {
-    borderRadius: Theme.borderRadius.lg,
-    borderWidth: 2,
+  groupCardWrapper: {
+    position: 'relative',
+  },
+  selectedBadge: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
   },
   bottomContainer: {
     padding: Theme.spacing.md,

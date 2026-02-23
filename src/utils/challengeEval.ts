@@ -5,10 +5,12 @@
 import { dateKeys } from './dateKeys';
 import {
   resolveAdminTimeZone,
+  getAdminZoneDayKey,
   getCurrentPeriodDayKey,
   getCurrentPeriodWeekKey,
   computeDueMomentUtcForDay,
   computeWeeklyDueMomentUtc,
+  computeDeadlineMomentUtc,
   getAdminZoneWeekKey,
   formatDueMomentInViewerZone,
 } from './dueTime';
@@ -110,9 +112,11 @@ export const challengeEval = {
     const dueTimeLocal = challenge.due?.dueTimeLocal || '23:59';
     let currentPeriodKey: string;
     if (challenge.cadence.unit === 'daily') {
-      currentPeriodKey = getCurrentPeriodDayKey(adminTz, dueTimeLocal);
+      currentPeriodKey = challenge.type === 'deadline'
+        ? getAdminZoneDayKey(adminTz)
+        : getCurrentPeriodDayKey(adminTz, dueTimeLocal);
     } else {
-      currentPeriodKey = getCurrentPeriodWeekKey(adminTz, challenge.cadence.weekStartsOn ?? 1);
+      currentPeriodKey = getCurrentPeriodWeekKey(adminTz, challenge.cadence.weekStartsOn ?? 0);
     }
     
     const periodKey = selectedPeriodKey || currentPeriodKey;
@@ -178,6 +182,14 @@ export const challengeEval = {
       };
     }
 
+    // Deadline challenge: if deadline has passed, mark as missed
+    if (challenge.type === 'deadline' && challenge.due?.deadlineDate) {
+      const deadlineMoment = computeDeadlineMomentUtc(adminTz, challenge.due.deadlineDate, dueTimeLocal);
+      if (new Date().getTime() >= deadlineMoment.getTime()) {
+        return { type: 'missed', missedAt: 'Deadline passed' };
+      }
+    }
+
     // At this point, we're in the CURRENT period and not completed yet.
     // Compute time remaining using the canonical UTC due moment.
     const now = new Date();
@@ -187,7 +199,7 @@ export const challengeEval = {
         adminTz,
         currentPeriodKey,
         dueTimeLocal,
-        challenge.cadence.weekStartsOn ?? 1
+        challenge.cadence.weekStartsOn ?? 0
       );
     } else {
       dueMomentUtc = computeDueMomentUtcForDay(adminTz, currentPeriodKey, dueTimeLocal);
