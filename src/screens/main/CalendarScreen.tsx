@@ -6,6 +6,9 @@ import {
   SafeAreaView,
   TouchableOpacity,
   ScrollView,
+  Image,
+  Dimensions,
+  Modal,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,6 +39,8 @@ export const CalendarScreen: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [currentMonth, setCurrentMonth] = useState<Date>(new Date());
   const [showChallengeDropdown, setShowChallengeDropdown] = useState(false);
+  const [viewMode, setViewMode] = useState<'challenges' | 'pictures'>('challenges');
+  const [viewerImage, setViewerImage] = useState<string | null>(null);
 
   // Load challenges once user is available
   useEffect(() => {
@@ -169,6 +174,31 @@ export const CalendarScreen: React.FC = () => {
     }).filter(item => item.challenge);
   };
 
+  // Get photos for selected date
+  const getPhotosForDate = (date: Date): Array<{ uri: string; challengeTitle: string; checkIn: CheckIn }> => {
+    const dayKey = dateKeys.getDayKey(date);
+    const photos: Array<{ uri: string; challengeTitle: string; checkIn: CheckIn }> = [];
+
+    const relevantCheckIns = checkInsForMonth.filter(ci => {
+      if (!ci.period?.dayKey) return false;
+      if (ci.period.dayKey !== dayKey) return false;
+      if (ci.userId !== user?.id) return false;
+      if (selectedChallenge !== 'all' && ci.challengeId !== selectedChallenge) return false;
+      return true;
+    });
+
+    for (const ci of relevantCheckIns) {
+      const attachments = (ci as any).attachments || [];
+      const challenge = challenges.find(c => c.id === ci.challengeId);
+      const title = challenge?.title || 'Challenge';
+      for (const att of attachments) {
+        const uri = att.uri || att.url;
+        if (uri) photos.push({ uri, challengeTitle: title, checkIn: ci });
+      }
+    }
+    return photos;
+  };
+
   const isToday = (date: Date): boolean => {
     const today = new Date();
     return dateKeys.getDayKey(date) === dateKeys.getDayKey(today);
@@ -221,6 +251,14 @@ export const CalendarScreen: React.FC = () => {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <View style={[styles.header, { backgroundColor: colors.background }]}>
+          <TouchableOpacity
+            onPress={() => setViewMode(viewMode === 'challenges' ? 'pictures' : 'challenges')}
+            style={[styles.picturesButton, { backgroundColor: colors.accent }]}
+          >
+            <Text style={styles.picturesButtonText}>
+              {viewMode === 'challenges' ? 'Pictures' : 'Challenges'}
+            </Text>
+          </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: colors.text }]}>Calendar</Text>
           <TouchableOpacity onPress={goToToday} style={[styles.todayButton, { backgroundColor: colors.accent }]}>
             <Text style={styles.todayButtonText}>Today</Text>
@@ -357,42 +395,119 @@ export const CalendarScreen: React.FC = () => {
 
         <View style={[styles.challengesSection, { backgroundColor: colors.surface }]}>
           <Text style={[styles.challengesSectionTitle, { color: colors.text }]}>{formatSelectedDate()}</Text>
-          
-          {challengesForSelectedDate.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="calendar-outline" size={48} color={colors.textSecondary} />
-              <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>No check-ins on this day</Text>
-            </View>
+
+          {viewMode === 'challenges' ? (
+            // Challenges view
+            challengesForSelectedDate.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons name="calendar-outline" size={48} color={colors.textSecondary} />
+                <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>No check-ins on this day</Text>
+              </View>
+            ) : (
+              <View style={styles.challengesList}>
+                {challengesForSelectedDate.map(({ challenge, checkIn }) => (
+                  <View key={checkIn.id} style={[styles.challengeItem, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '50' }]}>
+                    <View style={styles.challengeItemIcon}>
+                      <Ionicons
+                        name={checkIn.status === 'completed' ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={24}
+                        color={checkIn.status === 'completed' ? '#4CAF50' : colors.textSecondary}
+                      />
+                    </View>
+                    <View style={styles.challengeItemContent}>
+                      <Text style={[styles.challengeItemTitle, { color: colors.text }]}>{challenge.title}</Text>
+                      <Text style={[styles.challengeItemSubtitle, { color: colors.textSecondary }]}>
+                        {checkIn.status === 'completed' ? 'Completed' : 'Pending'}
+                        {(() => {
+                          const raw = checkIn.createdAt;
+                          if (!raw) return '';
+                          const date = raw instanceof Date ? raw
+                            : typeof raw === 'number' ? new Date(raw)
+                            : (raw as any)?.toMillis ? new Date((raw as any).toMillis())
+                            : new Date(raw as any);
+                          return ` • ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+                        })()}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )
           ) : (
-            <View style={styles.challengesList}>
-              {challengesForSelectedDate.map(({ challenge, checkIn }) => (
-                <View key={checkIn.id} style={[styles.challengeItem, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '50' }]}>
-                  <View style={styles.challengeItemIcon}>
-                    <Ionicons 
-                      name={checkIn.status === 'completed' ? 'checkmark-circle' : 'ellipse-outline'} 
-                      size={24} 
-                      color={checkIn.status === 'completed' ? '#4CAF50' : colors.textSecondary} 
-                    />
+            // Pictures view — chat-style cards with full-screen viewer
+            (() => {
+              const photos = getPhotosForDate(selectedDate);
+              if (photos.length === 0) {
+                return (
+                  <View style={styles.emptyState}>
+                    <Ionicons name="images-outline" size={48} color={colors.textSecondary} />
+                    <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>No photos on this day</Text>
                   </View>
-                  <View style={styles.challengeItemContent}>
-                    <Text style={[styles.challengeItemTitle, { color: colors.text }]}>{challenge.title}</Text>
-                    <Text style={[styles.challengeItemSubtitle, { color: colors.textSecondary }]}>
-                      {checkIn.status === 'completed' ? 'Completed' : 'Pending'}
-                      {(() => {
-                        const raw = checkIn.createdAt;
-                        if (!raw) return '';
-                        const date = raw instanceof Date ? raw
-                          : typeof raw === 'number' ? new Date(raw)
-                          : (raw as any)?.toMillis ? new Date((raw as any).toMillis())
-                          : new Date(raw as any);
-                        return ` • ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
-                      })()}
-                    </Text>
-                  </View>
+                );
+              }
+              return (
+                <View style={styles.photoList}>
+                  {photos.map((photo, idx) => (
+                    <View key={idx} style={[styles.photoCard, { backgroundColor: colors.card, borderColor: colors.dividerLineTodo + '50' }]}>
+                      <View style={styles.photoCardHeader}>
+                        <Ionicons name="trophy" size={16} color={colors.accent} />
+                        <Text style={[styles.photoCardTitle, { color: colors.accent }]} numberOfLines={1}>{photo.challengeTitle}</Text>
+                      </View>
+                      <TouchableOpacity
+                        activeOpacity={0.9}
+                        onPress={() => setViewerImage(photo.uri)}
+                        style={styles.photoImageTouchable}
+                      >
+                        <Image source={{ uri: photo.uri }} style={styles.photoImage} resizeMode="cover" />
+                      </TouchableOpacity>
+                      <Text style={[styles.photoTime, { color: colors.textSecondary }]}>
+                        {(() => {
+                          const raw = photo.checkIn.createdAt;
+                          if (!raw) return '';
+                          const date = raw instanceof Date ? raw
+                            : typeof raw === 'number' ? new Date(raw)
+                            : (raw as any)?.toMillis ? new Date((raw as any).toMillis())
+                            : new Date(raw as any);
+                          return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                        })()}
+                      </Text>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </View>
+              );
+            })()
           )}
+
+          {/* Full-screen image viewer modal */}
+          <Modal
+            visible={!!viewerImage}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setViewerImage(null)}
+          >
+            <TouchableOpacity
+              activeOpacity={1}
+              style={styles.imageModalOverlay}
+              onPress={() => setViewerImage(null)}
+            >
+              <View style={styles.imageModalContent}>
+                <TouchableOpacity
+                  style={styles.imageModalClose}
+                  onPress={() => setViewerImage(null)}
+                  hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                >
+                  <Ionicons name="close" size={32} color="#FFF" />
+                </TouchableOpacity>
+                {viewerImage && (
+                  <Image
+                    source={{ uri: viewerImage }}
+                    style={styles.imageModalImage}
+                    resizeMode="contain"
+                  />
+                )}
+              </View>
+            </TouchableOpacity>
+          </Modal>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -418,6 +533,18 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 28,
     fontWeight: '700',
+  },
+  picturesButton: {
+    position: 'absolute',
+    left: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  picturesButtonText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   todayButton: {
     position: 'absolute',
@@ -612,5 +739,67 @@ const styles = StyleSheet.create({
   },
   challengeItemSubtitle: {
     fontSize: 14,
+  },
+  photoList: {
+    gap: 12,
+    paddingBottom: 40,
+  },
+  photoCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  photoCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  photoCardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    flex: 1,
+  },
+  photoImageTouchable: {
+    width: '100%',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  photoImage: {
+    width: '100%',
+    height: 280,
+    borderRadius: 12,
+  },
+  photoTime: {
+    fontSize: 11,
+    marginTop: 8,
+  },
+  imageModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalContent: {
+    width: Dimensions.get('window').width,
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageModalClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+    padding: 8,
+  },
+  imageModalImage: {
+    width: Dimensions.get('window').width,
+    height: '80%',
   },
 });

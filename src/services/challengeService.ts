@@ -44,6 +44,7 @@ export class ChallengeService {
       progressionDuration?: number;
       progressionIntervalType?: string;
       assessmentTime?: Date;
+      category?: string;
       cadence?: { unit: 'daily' | 'weekly'; requiredCount?: number; weekStartsOn?: number };
       submission?: {
         inputType: 'boolean' | 'number' | 'text' | 'timer';
@@ -101,6 +102,7 @@ export class ChallengeService {
       if (challengeType === 'group' && groupId) {
         challengeData.groupId = groupId;
       }
+      if (opts.category) challengeData.category = opts.category;
       if (opts.eliminationRule) challengeData.eliminationRule = opts.eliminationRule;
       if (type === 'elimination') {
         challengeData.rules = { elimination: { strikesAllowed: opts.strikesAllowed ?? 0 } };

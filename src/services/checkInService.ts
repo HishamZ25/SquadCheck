@@ -152,9 +152,6 @@ export class CheckInService {
       let periodKey: string;
 
       if (cadenceUnit === 'daily') {
-        // Deadline challenges: use the plain calendar date — no due-time rollover.
-        // Standard/elimination/progress: use getCurrentPeriodDayKey which rolls
-        // past-due check-ins into the next day's period.
         if (challengeData.type === 'deadline') {
           periodKey = getAdminZoneDayKey(adminTz, now);
         } else {
@@ -166,15 +163,14 @@ export class CheckInService {
         period.weekKey = periodKey;
       }
 
-      // Duplicate check-in prevention: query for existing check-ins in the same period
+      // Duplicate check-in prevention
       const periodField = cadenceUnit === 'daily' ? 'period.dayKey' : 'period.weekKey';
-      const duplicateQuery = query(
+      const existingCheckIns = await getDocs(query(
         collection(db, 'checkIns'),
         where('challengeId', '==', challengeId),
         where('userId', '==', userId),
         where(periodField, '==', periodKey)
-      );
-      const existingCheckIns = await getDocs(duplicateQuery);
+      ));
       const completedCount = existingCheckIns.docs.filter(d => d.data().status === 'completed').length;
       const requiredCount = cadenceUnit === 'daily' ? 1 : (challengeData.cadence?.requiredCount || 1);
       if (completedCount >= requiredCount) {
@@ -192,12 +188,6 @@ export class CheckInService {
         createdAt: Date.now(),
       };
 
-      const docRef = await addDoc(collection(db, 'checkIns'), checkInData);
-
-      // Gamification: update streak and award XP
-      let streakResult: StreakResult;
-      let xpResult: XPResult;
-
       // Compute on-time synchronously (pure math, no I/O)
       let isOnTime = false;
       if (cadenceUnit === 'daily') {
@@ -206,14 +196,30 @@ export class CheckInService {
         isOnTime = msRemaining > 60 * 60 * 1000; // >1hr remaining
       }
 
-      try {
-        // Streak must complete first (XP calc depends on streak count)
-        streakResult = await GamificationService.updateStreak(challengeId, userId, periodKey, cadenceUnit);
+      // Write check-in doc and update streak in parallel (they don't depend on each other)
+      let streakResult: StreakResult;
+      let xpResult: XPResult;
+      let docRef: any;
 
-        // Award XP (also updates user's longestStreak in the same write)
+      try {
+        const [writeResult, streak] = await Promise.all([
+          addDoc(collection(db, 'checkIns'), checkInData),
+          GamificationService.updateStreak(challengeId, userId, periodKey, cadenceUnit).catch((e) => {
+            if (__DEV__) console.error('Streak error (non-blocking):', e);
+            return { currentStreak: 0, longestStreak: 0, isNewMilestone: false, milestoneValue: 0, shieldEarned: false } as StreakResult;
+          }),
+        ]);
+        docRef = writeResult;
+        streakResult = streak;
+
+        // Award XP (depends on streak count)
         xpResult = await GamificationService.awardCheckInXP(userId, challengeId, isOnTime, streakResult.currentStreak, streakResult.longestStreak);
       } catch (e) {
         if (__DEV__) console.error('Gamification error (non-blocking):', e);
+        if (!docRef) {
+          // addDoc itself failed — re-throw
+          throw e;
+        }
         streakResult = { currentStreak: 0, longestStreak: 0, isNewMilestone: false, milestoneValue: 0, shieldEarned: false };
         xpResult = { xpEarned: 0, newLevel: 1, newTitle: 'Rookie', leveledUp: false };
       }

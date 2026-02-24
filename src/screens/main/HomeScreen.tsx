@@ -187,14 +187,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ navigation }) => {
 
       const mergedChallenges = deduplicateChallenges(userChallenges);
       setChallenges(mergedChallenges);
-      if (showLoading) setLoading(false);
       lastLoadedAt.current = Date.now();
 
-      // Prefetch details and members in background so list appears immediately
-      Promise.all([
-        loadGroupMembers(userGroups),
-        prefetchChallengeDetails(mergedChallenges, user.id)
-      ]).catch((err) => { if (__DEV__) console.error('Background prefetch error:', err); });
+      // On first load, wait for details so cards don't flash from "to do" → "finished".
+      // On subsequent loads (background refetch), fire in background.
+      if (showLoading) {
+        await Promise.all([
+          loadGroupMembers(userGroups),
+          prefetchChallengeDetails(mergedChallenges, user.id)
+        ]).catch((err) => { if (__DEV__) console.error('Prefetch error:', err); });
+        setLoading(false);
+      } else {
+        Promise.all([
+          loadGroupMembers(userGroups),
+          prefetchChallengeDetails(mergedChallenges, user.id)
+        ]).catch((err) => { if (__DEV__) console.error('Background prefetch error:', err); });
+      }
     } catch (error) {
       if (__DEV__) console.error('Error loading data:', error);
       setError('Failed to load data');

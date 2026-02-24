@@ -24,6 +24,11 @@ import { AuthService } from '../../services/authService';
 import { auth } from '../../services/firebase';
 import { Group } from '../../types';
 import { useColorMode } from '../../theme/ColorModeContext';
+import {
+  CHALLENGE_CATEGORIES,
+  CHALLENGE_TEMPLATES,
+  ChallengeTemplate,
+} from '../../constants/challengeTemplates';
 
 type ChallengeType = 'elimination' | 'deadline' | 'progress';
 
@@ -51,6 +56,7 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
   const isSolo = route?.params?.isSolo || false;
   const groupId = route?.params?.groupId;
   
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [challengeTitle, setChallengeTitle] = useState('');
   const [description, setDescription] = useState('');
   const [requirements, setRequirements] = useState(['']);
@@ -153,6 +159,20 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
     );
     setChallengeCountByGroupId((prev) => ({ ...prev, ...counts }));
   };
+
+  const applyTemplate = (template: ChallengeTemplate) => {
+    setChallengeTitle(template.title);
+    setDescription(template.description);
+    setInputType(template.inputType);
+    setCadenceUnit(template.cadenceUnit);
+    setRequireAttachment(template.requireAttachment);
+    if (template.unitLabel) setUnitLabel(template.unitLabel);
+    if (template.minValue != null) setMinValue(template.minValue);
+  };
+
+  const filteredTemplates = selectedCategory && selectedCategory !== 'custom'
+    ? CHALLENGE_TEMPLATES.filter(t => t.categoryId === selectedCategory)
+    : [];
 
   const toggleFriendSelection = (friendId: string) => {
     setFriends(prevFriends => 
@@ -290,6 +310,7 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
         finalGroupId,
         {
           requirements: requirements.filter(req => req.trim()),
+          category: selectedCategory || undefined,
           eliminationRule: challengeType === 'elimination' ? eliminationRule : undefined,
           strikesAllowed: challengeType === 'elimination' ? strikesAllowed : undefined,
           startDate: challengeType === 'deadline' ? startDate : undefined,
@@ -354,6 +375,66 @@ export const CreateChallengeScreen: React.FC<CreateChallengeScreenProps> = ({ na
           <Text style={[styles.headerTitle, { color: colors.text }]}>Configure Challenge</Text>
           <View style={styles.placeholder} />
         </View>
+
+        {/* Category Selection */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Category</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll} contentContainerStyle={styles.categoryScrollContent}>
+            {CHALLENGE_CATEGORIES.map((cat) => {
+              const isSelected = selectedCategory === cat.id;
+              return (
+                <TouchableOpacity
+                  key={cat.id}
+                  style={[
+                    styles.categoryChip,
+                    { backgroundColor: colors.surface, borderColor: isSelected ? cat.color : 'transparent' },
+                    isSelected && { backgroundColor: cat.color + '15' },
+                  ]}
+                  onPress={() => setSelectedCategory(isSelected ? null : cat.id)}
+                >
+                  <Ionicons name={cat.icon as any} size={18} color={isSelected ? cat.color : colors.textSecondary} />
+                  <Text style={[styles.categoryChipText, { color: isSelected ? cat.color : colors.text }]}>{cat.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
+        {/* Template Suggestions */}
+        {filteredTemplates.length > 0 && (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Templates</Text>
+            <Text style={[styles.configSubtitle, { color: colors.textSecondary }]}>Tap to pre-fill, or skip and create your own</Text>
+            <View style={styles.templateGrid}>
+              {filteredTemplates.map((template) => {
+                const isApplied = challengeTitle === template.title;
+                const cat = CHALLENGE_CATEGORIES.find(c => c.id === template.categoryId);
+                return (
+                  <TouchableOpacity
+                    key={template.id}
+                    style={[
+                      styles.templateCard,
+                      { backgroundColor: colors.surface, borderColor: isApplied ? (cat?.color || colors.accent) : colors.dividerLineTodo + '50' },
+                      isApplied && { backgroundColor: (cat?.color || colors.accent) + '10' },
+                    ]}
+                    onPress={() => applyTemplate(template)}
+                  >
+                    <Text style={[styles.templateTitle, { color: isApplied ? (cat?.color || colors.accent) : colors.text }]}>{template.title}</Text>
+                    <Text style={[styles.templateDesc, { color: colors.textSecondary }]} numberOfLines={2}>{template.description}</Text>
+                    <View style={styles.templateMeta}>
+                      <Text style={[styles.templateMetaText, { color: colors.textSecondary }]}>
+                        {template.inputType === 'boolean' ? 'Yes/No' : template.inputType === 'number' ? template.unitLabel || 'Number' : template.inputType === 'timer' ? 'Timer' : 'Text'}
+                      </Text>
+                      <Text style={[styles.templateMetaText, { color: colors.textSecondary }]}>
+                        {template.cadenceUnit === 'daily' ? 'Daily' : 'Weekly'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
 
         <View style={styles.section}>
           <Input
@@ -1280,5 +1361,51 @@ const styles = StyleSheet.create({
   attachmentToggleText: {
     ...Theme.typography.body,
     color: '#333333',
+  },
+  categoryScroll: {
+    marginHorizontal: -Theme.layout.screenPadding,
+  },
+  categoryScrollContent: {
+    paddingHorizontal: Theme.layout.screenPadding,
+    gap: 8,
+  },
+  categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    gap: 6,
+  },
+  categoryChipText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  templateGrid: {
+    gap: 10,
+  },
+  templateCard: {
+    borderRadius: 14,
+    borderWidth: 1.5,
+    padding: 14,
+  },
+  templateTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  templateDesc: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  templateMeta: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  templateMetaText: {
+    fontSize: 12,
+    fontWeight: '500',
   },
 });

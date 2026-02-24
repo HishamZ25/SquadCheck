@@ -17,6 +17,7 @@ import { AuthService } from '../../services/authService';
 import { GroupService } from '../../services/groupService';
 import { FriendshipService } from '../../services/friendshipService';
 import { User } from '../../types';
+import { buildGroupInviteMessage } from '../../constants/appLinks';
 
 type Props = StackScreenProps<{ InviteToGroup: { groupId: string; groupName?: string } }, 'InviteToGroup'>;
 
@@ -77,7 +78,7 @@ export const InviteToGroupScreen: React.FC<Props> = ({ navigation, route }) => {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Join my fitness squad "${groupName || 'Squad'}" on SquadCheck!`,
+        message: buildGroupInviteMessage(groupName || 'Squad', groupId),
         title: 'Invite to squad',
       });
     } catch (e) {

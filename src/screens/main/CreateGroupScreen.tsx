@@ -9,6 +9,7 @@ import {
   Alert,
   Platform,
   Modal,
+  Share,
 } from 'react-native';
 
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +23,7 @@ import { GroupService } from '../../services/groupService';
 import { FriendshipService } from '../../services/friendshipService';
 import { auth } from '../../services/firebase';
 import { useColorMode } from '../../theme/ColorModeContext';
+import { buildGroupInviteMessage } from '../../constants/appLinks';
 
 type GroupType = 'elimination' | 'deadline' | 'progress';
 
@@ -223,32 +225,35 @@ export const CreateGroupScreen: React.FC<CreateGroupScreenProps> = ({ navigation
       const selectedFriends = friends.filter(friend => friend.selected);
       
       if (selectedFriends.length > 0) {
-        // TODO: Create invitations for selected friends
         Alert.alert(
-          'Group Created! 🎉', 
+          'Group Created!',
           `Your group "${challengeTitle}" has been created successfully! ${selectedFriends.length} friend(s) will receive in-app invites.`,
           [
             { text: 'OK', style: 'default' },
-            { 
-              text: 'Share Group Link', 
+            {
+              text: 'Share Group Link',
               onPress: () => {
-                // TODO: Generate and share actual group invite link
-                Alert.alert('Share Group', `Group ID: ${groupId}\nInvite link will be generated here after deep linking setup.`);
+                Share.share({
+                  message: buildGroupInviteMessage(challengeTitle, groupId),
+                  title: 'Invite to squad',
+                }).catch(() => {});
               }
             }
           ]
         );
       } else {
         Alert.alert(
-          'Group Created! 🎉', 
+          'Group Created!',
           `Your group "${challengeTitle}" has been created successfully! You can invite friends later.`,
           [
             { text: 'OK', style: 'default' },
-            { 
-              text: 'Invite Friends Now', 
+            {
+              text: 'Share Group Link',
               onPress: () => {
-                // TODO: Navigate to invite friends screen
-                Alert.alert('Invite Friends', 'Navigate to invite friends screen after Firebase integration.');
+                Share.share({
+                  message: buildGroupInviteMessage(challengeTitle, groupId),
+                  title: 'Invite to squad',
+                }).catch(() => {});
               }
             }
           ]

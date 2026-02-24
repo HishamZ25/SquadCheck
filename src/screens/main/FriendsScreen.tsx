@@ -18,6 +18,7 @@ import { Avatar } from '../../components/common/Avatar';
 import { LoadingSpinner } from '../../components/common/LoadingSpinner';
 import { AddFriendModal } from '../../components/common/AddFriendModal';
 import { User } from '../../types';
+import { buildFriendInviteMessage } from '../../constants/appLinks';
 import { useColorMode } from '../../theme/ColorModeContext';
 
 interface FriendsScreenProps {
@@ -126,12 +127,10 @@ export const FriendsScreen: React.FC<FriendsScreenProps> = ({ navigation }) => {
 
   const handleInviteFriends = async () => {
     if (!user) return;
-    
+
     try {
-      const message = `Join me on SquadCheck! Use my friend code: ${user.id.substring(0, 8)}\n\nDownload the app and let's stay accountable together!`;
-      
       await Share.share({
-        message,
+        message: buildFriendInviteMessage(user.id.substring(0, 8)),
         title: 'Join SquadCheck',
       });
     } catch (error) {

@@ -96,6 +96,7 @@ export interface Challenge {
   description?: string;
 
   type: 'standard' | 'progress' | 'elimination' | 'deadline';
+  category?: string;                   // e.g. 'fitness', 'diet', 'study', 'custom'
 
   cadence: {
     unit: 'daily' | 'weekly';
